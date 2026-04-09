@@ -25,6 +25,8 @@ export type NewSidebarProps<K> = {
   onClose: () => void;
   activeTab: K | undefined;
   setActiveTab: (newValue: K) => void;
+  hideClose?: boolean;
+  headerActions?: React.ReactNode;
 };
 
 export type LayoutNode = "leftbar" | "children" | "rightbar";
@@ -40,6 +42,7 @@ export type SidebarProps<OldLeftKey, LeftKey, RightKey> = PropsWithChildren<{
   onSelectLeftKey: (item: LeftKey | undefined) => void;
   leftSidebarSize: number | undefined;
   setLeftSidebarSize: (size: number | undefined) => void;
+  leftHeaderActions?: React.ReactNode;
 
   rightItems: Map<RightKey, SidebarItem>;
   selectedRightKey: RightKey | undefined;

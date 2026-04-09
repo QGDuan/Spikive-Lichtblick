@@ -1,0 +1,31 @@
+/**
+ * Spikive Global CSS Overrides
+ *
+ * Hides native Lichtblick UI chrome that is not needed in the
+ * multi-robot ground station interface.
+ *
+ * Preserved: left Robots sidebar, 3D panel canvas, publish tool overlay.
+ */
+
+/* ── AppBar (top navigation bar) ── */
+[data-tourid="app-bar"] {
+  display: none !important;
+}
+
+/* ── PlaybackControls (timeline / scrubber at the bottom) ──
+   For live Rosbridge connections this is already hidden (no playback
+   capabilities), but we hide it defensively for bag-file scenarios. */
+[data-testid="play-button"],
+[data-testid="seek-backward-button"],
+[data-testid="seek-forward-button"] {
+  /* Anchor selectors — the real rule is on the wrapper below */
+}
+/* The outer wrapper div with inline flexShrink:0 that holds PlaybackControls */
+div[style*="flex-shrink: 0"]:has([data-testid="play-button"]) {
+  display: none !important;
+}
+
+/* ── PanelToolbar (drag handle / settings gear above each panel) ── */
+[data-testid="mosaic-drag-handle"] {
+  display: none !important;
+}

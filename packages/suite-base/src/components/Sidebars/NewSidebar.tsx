@@ -23,6 +23,8 @@ export function NewSidebar<K extends string>({
   onClose,
   activeTab,
   setActiveTab,
+  hideClose,
+  headerActions,
 }: NewSidebarProps<K>): React.JSX.Element {
   const { classes, cx } = useStyles();
 
@@ -84,14 +86,17 @@ export function NewSidebar<K extends string>({
           {memoizedTabs}
         </Tabs>
 
-        <IconButton
-          className={classes.iconButton}
-          onClick={onClose}
-          size="small"
-          data-testid={`sidebar-close-${anchor}`}
-        >
-          <CloseIcon fontSize="inherit" />
-        </IconButton>
+        {hideClose !== true && (
+          <IconButton
+            className={classes.iconButton}
+            onClick={onClose}
+            size="small"
+            data-testid={`sidebar-close-${anchor}`}
+          >
+            <CloseIcon fontSize="inherit" />
+          </IconButton>
+        )}
+        {headerActions}
       </Stack>
       <Divider />
       {activeTab != undefined && (

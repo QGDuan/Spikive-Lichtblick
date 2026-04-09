@@ -39,7 +39,7 @@ export function makeWorkspaceContextInitialState(): WorkspaceContextStore {
     },
     sidebars: {
       left: {
-        item: "panel-settings",
+        item: "robots",
         open: true,
         size: undefined,
       },

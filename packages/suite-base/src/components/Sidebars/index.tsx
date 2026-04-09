@@ -33,6 +33,7 @@ export default function Sidebars<
     onSelectLeftKey,
     leftSidebarSize,
     setLeftSidebarSize,
+    leftHeaderActions,
     rightItems,
     selectedRightKey,
     onSelectRightKey,
@@ -117,6 +118,8 @@ export default function Sidebars<
                       items={leftItems}
                       activeTab={selectedLeftKey}
                       setActiveTab={onSelectLeftKey}
+                      hideClose
+                      headerActions={leftHeaderActions}
                     />
                   </ErrorBoundary>
                 );

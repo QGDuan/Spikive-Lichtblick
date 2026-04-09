@@ -14,7 +14,6 @@
 //   You may not use this file except in compliance with the License.
 
 import { Link, Typography } from "@mui/material";
-import { t } from "i18next";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 
@@ -22,7 +21,6 @@ import Logger from "@lichtblick/log";
 import { AppSetting } from "@lichtblick/suite-base/AppSetting";
 import { useStyles } from "@lichtblick/suite-base/Workspace.style";
 import AccountSettings from "@lichtblick/suite-base/components/AccountSettingsSidebar/AccountSettings";
-import { AlertsList } from "@lichtblick/suite-base/components/AlertsList";
 import { AppBar } from "@lichtblick/suite-base/components/AppBar";
 import {
   DataSourceDialog,
@@ -30,7 +28,6 @@ import {
 } from "@lichtblick/suite-base/components/DataSourceDialog";
 import DataSourceSidebar from "@lichtblick/suite-base/components/DataSourceSidebar/DataSourceSidebar";
 import DocumentDropListener from "@lichtblick/suite-base/components/DocumentDropListener";
-import { EventsList } from "@lichtblick/suite-base/components/EventsList";
 import ExtensionsSettings from "@lichtblick/suite-base/components/ExtensionsSettings";
 import KeyListener from "@lichtblick/suite-base/components/KeyListener";
 import LayoutBrowser from "@lichtblick/suite-base/components/LayoutBrowser";
@@ -39,6 +36,8 @@ import {
   useMessagePipeline,
   useMessagePipelineGetter,
 } from "@lichtblick/suite-base/components/MessagePipeline";
+import { MultiRobotSidebar } from "@lichtblick/suite-base/components/MultiRobotSidebar";
+import { ThemeToggleButton } from "@lichtblick/suite-base/spikive/components/ThemeToggleButton";
 import { PanelCatalog } from "@lichtblick/suite-base/components/PanelCatalog";
 import PanelLayout from "@lichtblick/suite-base/components/PanelLayout";
 import PanelSettings from "@lichtblick/suite-base/components/PanelSettings";
@@ -49,11 +48,9 @@ import Sidebars from "@lichtblick/suite-base/components/Sidebars";
 import { SidebarItem } from "@lichtblick/suite-base/components/Sidebars/types";
 import Stack from "@lichtblick/suite-base/components/Stack";
 import {
-  StudioLogsSettings,
   StudioLogsSettingsSidebar,
 } from "@lichtblick/suite-base/components/StudioLogsSettings";
 import { SyncAdapters } from "@lichtblick/suite-base/components/SyncAdapters";
-import { TopicList } from "@lichtblick/suite-base/components/TopicList";
 import VariablesList from "@lichtblick/suite-base/components/VariablesList";
 import { WorkspaceDialogs } from "@lichtblick/suite-base/components/WorkspaceDialogs";
 import { AllowedFileExtensions } from "@lichtblick/suite-base/constants/allowedFileExtensions";
@@ -64,7 +61,6 @@ import {
 } from "@lichtblick/suite-base/context/CurrentLayoutContext";
 import {
   useCurrentUser,
-  useCurrentUserType,
 } from "@lichtblick/suite-base/context/CurrentUserContext";
 import { EventsStore, useEvents } from "@lichtblick/suite-base/context/EventsContext";
 import { usePlayerSelection } from "@lichtblick/suite-base/context/PlayerSelectionContext";
@@ -110,8 +106,6 @@ function isInjectedSidebarItem(
 }
 
 const selectPlayerPresence = ({ playerState }: MessagePipelineContext) => playerState.presence;
-const selectPlayerIsPresent = ({ playerState }: MessagePipelineContext) =>
-  playerState.presence !== PlayerPresence.NOT_PRESENT;
 const selectIsPlaying = (ctx: MessagePipelineContext) =>
   ctx.playerState.activeData?.isPlaying === true;
 const selectPause = (ctx: MessagePipelineContext) => ctx.pausePlayback;
@@ -119,7 +113,6 @@ const selectPlay = (ctx: MessagePipelineContext) => ctx.startPlayback;
 const selectSeek = (ctx: MessagePipelineContext) => ctx.seekPlayback;
 const selectPlayUntil = (ctx: MessagePipelineContext) => ctx.playUntil;
 const selectPlayerId = (ctx: MessagePipelineContext) => ctx.playerState.playerId;
-const selectEventsSupported = (store: EventsStore) => store.eventsSupported;
 const selectSelectEvent = (store: EventsStore) => store.selectEvent;
 
 const selectWorkspaceDataSourceDialog = (store: WorkspaceContextStore) => store.dialogs.dataSource;
@@ -131,7 +124,6 @@ const selectWorkspaceRightSidebarOpen = (store: WorkspaceContextStore) => store.
 const selectWorkspaceRightSidebarSize = (store: WorkspaceContextStore) => store.sidebars.right.size;
 
 function WorkspaceContent(props: WorkspaceProps): React.JSX.Element {
-  const { PerformanceSidebarComponent } = useAppContext();
   const { classes } = useStyles();
   const containerRef = useRef<HTMLDivElement>(ReactNull);
   const { availableSources, selectSource } = usePlayerSelection();
@@ -187,13 +179,9 @@ function WorkspaceContent(props: WorkspaceProps): React.JSX.Element {
   // see comment below above the RemountOnValueChange component
   const playerId = useMessagePipeline(selectPlayerId);
 
-  const currentUserType = useCurrentUserType();
-
   useDefaultWebLaunchPreference();
 
   useStructureItemsStoreManager();
-
-  const [enableDebugMode = false] = useAppConfigurationValue<boolean>(AppSetting.SHOW_DEBUG_PANELS);
 
   const { currentUser, signIn } = useCurrentUser();
 
@@ -278,12 +266,6 @@ function WorkspaceContent(props: WorkspaceProps): React.JSX.Element {
       return <DataSourceSidebar disableToolbar={enableNewTopNav} />;
     };
   }, [enableNewTopNav]);
-
-  const PanelSettingsSidebar = useMemo(() => {
-    return function PanelSettingsSidebarImpl() {
-      return <PanelSettings disableToolbar />;
-    };
-  }, []);
 
   const { layoutBrowser: AppContextLayoutBrowser } = useAppContext();
 
@@ -372,56 +354,18 @@ function WorkspaceContent(props: WorkspaceProps): React.JSX.Element {
     appContextSidebarItems,
   ]);
 
-  const eventsSupported = useEvents(selectEventsSupported);
-  const showEventsTab = currentUserType !== "unauthenticated" && eventsSupported;
-
+  // Spikive: left sidebar only shows Robots tab
   const leftSidebarItems = useMemo(() => {
     const items = new Map<LeftSidebarItemKey, SidebarItem>([
-      ["panel-settings", { title: "Panel", component: PanelSettingsSidebar }],
-      ["topics", { title: "Topics", component: TopicList }],
-      [
-        "alerts",
-        {
-          title: "Alerts",
-          component: AlertsList,
-          badge: alertCount > 0 ? { count: alertCount, color: "error" } : undefined,
-        },
-      ],
-      ["layouts", { title: "Layouts", component: LayoutBrowser }],
+      ["robots", { title: "Robots", component: MultiRobotSidebar }],
     ]);
     return items;
-  }, [PanelSettingsSidebar, alertCount]);
+  }, []);
 
+  // Spikive: right sidebar is empty — all controls moved to left
   const rightSidebarItems = useMemo(() => {
-    const items = new Map<RightSidebarItemKey, SidebarItem>([
-      [
-        "variables",
-        {
-          title: t("workspace:variables"),
-          component: VariablesList,
-        },
-      ],
-    ]);
-    if (enableDebugMode) {
-      if (PerformanceSidebarComponent) {
-        items.set("performance", {
-          title: t("workspace:performance"),
-          component: PerformanceSidebarComponent,
-        });
-      }
-      items.set("logs-settings", {
-        title: t("workspace:studioLogs"),
-        component: StudioLogsSettings,
-      });
-    }
-    if (showEventsTab) {
-      items.set("events", {
-        title: t("workspace:events"),
-        component: EventsList,
-      });
-    }
-    return items;
-  }, [enableDebugMode, showEventsTab, PerformanceSidebarComponent]);
+    return new Map<RightSidebarItemKey, SidebarItem>();
+  }, []);
 
   const keyboardEventHasModifier = (event: KeyboardEvent) =>
     navigator.userAgent.includes("Mac") ? event.metaKey : event.ctrlKey;
@@ -585,6 +529,7 @@ function WorkspaceContent(props: WorkspaceProps): React.JSX.Element {
           onSelectLeftKey={sidebarActions.left.selectItem}
           leftSidebarSize={leftSidebarSize}
           setLeftSidebarSize={sidebarActions.left.setSize}
+          leftHeaderActions={<ThemeToggleButton />}
           rightItems={rightSidebarItems}
           selectedRightKey={rightSidebarOpen ? rightSidebarItem : undefined}
           onSelectRightKey={sidebarActions.right.selectItem}
@@ -617,16 +562,10 @@ function WorkspaceContent(props: WorkspaceProps): React.JSX.Element {
 }
 
 export default function Workspace(props: WorkspaceProps): React.JSX.Element {
-  const [showOpenDialogOnStartup = true] = useAppConfigurationValue<boolean>(
-    AppSetting.SHOW_OPEN_DIALOG_ON_STARTUP,
-  );
-
   const { workspaceStoreCreator } = useAppContext();
 
-  const isPlayerPresent = useMessagePipeline(selectPlayerIsPresent);
-
-  const initialItem: undefined | DataSourceDialogItem =
-    isPlayerPresent || !showOpenDialogOnStartup ? undefined : "start";
+  // Spikive: disable startup data source dialog, use custom robot sidebar instead
+  const initialItem: undefined | DataSourceDialogItem = undefined;
 
   const initialState: Pick<WorkspaceContextStore, "dialogs"> = {
     dialogs: {
