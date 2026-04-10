@@ -5,6 +5,7 @@ export type ConnectionStatus = "connecting" | "connected" | "disconnected" | "er
 
 export type RobotEntry = {
   id: string;
+  droneId: string;
   url: string;
   status: ConnectionStatus;
   isActive: boolean;
@@ -17,11 +18,10 @@ export type MultiRobotState = {
 };
 
 export type MultiRobotActions = {
-  addRobot: (url: string) => { success: boolean; error?: string };
+  addRobot: (url: string, droneId: string) => { success: boolean; error?: string };
   removeRobot: (id: string) => void;
   setActive: (id: string) => void;
   toggleVisibility: (id: string) => void;
-  hasDuplicate: (url: string) => boolean;
 };
 
 export type MultiRobotStore = MultiRobotState & MultiRobotActions;

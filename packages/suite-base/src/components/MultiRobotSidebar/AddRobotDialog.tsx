@@ -16,6 +16,17 @@ import { useCallback, useState } from "react";
 
 import { useStyles } from "./AddRobotDialog.style";
 
+function validateDroneId(droneId: string): string | undefined {
+  const trimmed = droneId.trim();
+  if (trimmed.length === 0) {
+    return "Please enter a Drone ID";
+  }
+  if (!/^\d+$/.test(trimmed)) {
+    return "Drone ID must be a number";
+  }
+  return undefined;
+}
+
 function validateUrl(url: string): string | undefined {
   const trimmed = url.trim();
   if (trimmed.length === 0) {
@@ -30,7 +41,7 @@ function validateUrl(url: string): string | undefined {
 type AddRobotDialogProps = {
   open: boolean;
   onClose: () => void;
-  onConnect: (url: string) => { success: boolean; error?: string };
+  onConnect: (url: string, droneId: string) => { success: boolean; error?: string };
 };
 
 export function AddRobotDialog({
@@ -39,8 +50,14 @@ export function AddRobotDialog({
   onConnect,
 }: AddRobotDialogProps): React.JSX.Element {
   const { classes } = useStyles();
+  const [droneId, setDroneId] = useState("1");
   const [url, setUrl] = useState("ws://192.168.1.10:8765");
   const [error, setError] = useState<string | undefined>();
+
+  const handleDroneIdChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setDroneId(e.target.value);
+    setError(undefined);
+  }, []);
 
   const handleUrlChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setUrl(e.target.value);
@@ -48,22 +65,29 @@ export function AddRobotDialog({
   }, []);
 
   const handleConnect = useCallback(() => {
-    const validationError = validateUrl(url);
-    if (validationError) {
-      setError(validationError);
+    const droneIdError = validateDroneId(droneId);
+    if (droneIdError) {
+      setError(droneIdError);
       return;
     }
 
-    const result = onConnect(url);
+    const urlError = validateUrl(url);
+    if (urlError) {
+      setError(urlError);
+      return;
+    }
+
+    const result = onConnect(url, droneId);
 
     if (result.success) {
+      setDroneId("1");
       setUrl("ws://192.168.1.10:8765");
       setError(undefined);
       onClose();
     } else {
       setError(result.error ?? "Connection failed");
     }
-  }, [url, onConnect, onClose]);
+  }, [droneId, url, onConnect, onClose]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -93,14 +117,24 @@ export function AddRobotDialog({
         )}
         <TextField
           className={classes.urlField}
-          label="Rosbridge WebSocket URL"
+          label="Drone ID"
+          placeholder="1"
+          value={droneId}
+          onChange={handleDroneIdChange}
+          onKeyDown={handleKeyDown}
+          fullWidth
+          size="small"
+          autoFocus
+        />
+        <TextField
+          className={classes.urlField}
+          label="Foxglove Bridge URL"
           placeholder="ws://192.168.1.10:8765"
           value={url}
           onChange={handleUrlChange}
           onKeyDown={handleKeyDown}
           fullWidth
           size="small"
-          autoFocus
         />
       </DialogContent>
       <DialogActions>

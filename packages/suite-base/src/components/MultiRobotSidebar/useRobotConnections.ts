@@ -16,16 +16,16 @@ function generateId(): string {
 export const useRobotConnectionsStore = create<MultiRobotStore>((set, get) => ({
   robots: [],
 
-  hasDuplicate: (url: string): boolean => {
-    const normalized = normalizeUrl(url);
-    return get().robots.some((r) => normalizeUrl(r.url) === normalized);
-  },
-
-  addRobot: (url: string): { success: boolean; error?: string } => {
+  addRobot: (url: string, droneId: string): { success: boolean; error?: string } => {
     const trimmedUrl = url.trim();
+    const trimmedDroneId = droneId.trim();
     const normalized = normalizeUrl(trimmedUrl);
+
     if (get().robots.some((r) => normalizeUrl(r.url) === normalized)) {
-      return { success: false, error: "This rosbridge address already exists" };
+      return { success: false, error: "This Foxglove Bridge address already exists" };
+    }
+    if (get().robots.some((r) => r.droneId === trimmedDroneId)) {
+      return { success: false, error: `Drone ID ${trimmedDroneId} already exists` };
     }
 
     const id = generateId();
@@ -35,8 +35,9 @@ export const useRobotConnectionsStore = create<MultiRobotStore>((set, get) => ({
         ...state.robots,
         {
           id,
+          droneId: trimmedDroneId,
           url: trimmedUrl,
-          status: "connected",
+          status: "connected" as const,
           isActive: isFirst,
           isVisible: true,
         },

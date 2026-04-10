@@ -77,7 +77,7 @@ export function RobotCard({
           sx={{ backgroundColor: STATUS_COLORS[robot.status] }}
         />
         <Typography className={classes.urlText} title={robot.url}>
-          {robot.url}
+          Drone {robot.droneId}
         </Typography>
         <Tooltip title={robot.isActive ? "Active" : "Set as active"}>
           <IconButton className={classes.actionButton} onClick={handleSetActive} size="small">
@@ -89,6 +89,9 @@ export function RobotCard({
           </IconButton>
         </Tooltip>
       </div>
+      <Typography variant="caption" color="text.secondary" noWrap title={robot.url} sx={{ px: 1 }}>
+        {robot.url}
+      </Typography>
       <div className={classes.actions}>
         <Tooltip title={robot.isVisible ? "Hide visualization" : "Show visualization"}>
           <IconButton className={classes.actionButton} onClick={handleToggleVisibility} size="small">
@@ -118,7 +121,7 @@ export function RobotCard({
         <DialogTitle>Remove Robot</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Disconnect and remove <strong>{robot.url}</strong>?
+            Disconnect and remove <strong>Drone {robot.droneId}</strong>?
           </DialogContentText>
         </DialogContent>
         <DialogActions>

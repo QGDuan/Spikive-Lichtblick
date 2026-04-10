@@ -52,12 +52,12 @@ export const defaultLayout: LayoutData =
           near: 0.5,
           far: 5000,
         },
-        followTf: "body",
+        followTf: TOPIC_CONFIG.followTf,
         followMode: "follow-position",
         scene: {},
         transforms: {},
         topics: {
-          [TOPIC_CONFIG.slam.pointCloud]: {
+          [TOPIC_CONFIG.subscribe.pointCloud]: {
             visible: true,
             colorField: "intensity",
             colorMode: "colormap",
@@ -66,18 +66,27 @@ export const defaultLayout: LayoutData =
             explicitAlpha: 0.15,
             pointSize: 0.5,
           },
-          [TOPIC_CONFIG.slam.path]: {
-            visible: false,
+          [TOPIC_CONFIG.subscribe.optimalTrajectory]: {
+            visible: true,
           },
-          [TOPIC_CONFIG.slam.pointCloudEffected]: {
-            visible: false,
+          [TOPIC_CONFIG.subscribe.goalPoint]: {
+            visible: true,
+          },
+          [TOPIC_CONFIG.subscribe.robotModel]: {
+            visible: true,
+          },
+          [TOPIC_CONFIG.subscribe.path]: {
+            visible: true,
+            type: "line",
+            lineWidth: 0.05,
+            gradient: ["#4fc3f7", "rgba(79, 195, 247, 0.8)"],
           },
         },
         publish: {
           type: "pose_estimate",
-          poseTopic: TOPIC_CONFIG.planner.goalPose,
-          pointTopic: TOPIC_CONFIG.planner.clickedPoint,
-          poseEstimateTopic: TOPIC_CONFIG.planner.initialPose,
+          poseTopic: TOPIC_CONFIG.publish.goalPose,
+          pointTopic: TOPIC_CONFIG.publish.clickedPoint,
+          poseEstimateTopic: TOPIC_CONFIG.publish.initialPose,
           poseEstimateXDeviation: 0.5,
           poseEstimateYDeviation: 0.5,
           poseEstimateThetaDeviation: 0.26179939,

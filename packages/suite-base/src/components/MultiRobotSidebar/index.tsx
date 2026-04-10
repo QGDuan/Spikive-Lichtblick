@@ -7,6 +7,7 @@ import { Button, Typography } from "@mui/material";
 import { useCallback, useState } from "react";
 
 import { usePlayerSelection } from "@lichtblick/suite-base/context/PlayerSelectionContext";
+import { useActiveDroneRouting } from "@lichtblick/suite-base/spikive/hooks/useActiveDroneRouting";
 
 import { AddRobotDialog } from "./AddRobotDialog";
 import { useStyles } from "./MultiRobotSidebar.style";
@@ -18,6 +19,8 @@ export function MultiRobotSidebar(): React.JSX.Element {
   const [dialogOpen, setDialogOpen] = useState(false);
   const { selectSource } = usePlayerSelection();
 
+  useActiveDroneRouting();
+
   const robots = useRobotConnectionsStore((s) => s.robots);
   const addRobot = useRobotConnectionsStore((s) => s.addRobot);
   const setActive = useRobotConnectionsStore((s) => s.setActive);
@@ -25,8 +28,8 @@ export function MultiRobotSidebar(): React.JSX.Element {
   const removeRobot = useRobotConnectionsStore((s) => s.removeRobot);
 
   const handleConnect = useCallback(
-    (url: string) => {
-      const result = addRobot(url);
+    (url: string, droneId: string) => {
+      const result = addRobot(url, droneId);
       if (result.success) {
         selectSource("foxglove-websocket", {
           type: "connection",
