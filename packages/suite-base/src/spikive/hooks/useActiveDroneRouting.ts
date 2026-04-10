@@ -23,6 +23,50 @@ const TOPIC_FIELDS: (keyof DroneTopics)[] = [
   "path",
 ];
 
+/** Fields that should NOT be pickable (everything except robotModel). */
+const NON_PICKABLE_FIELDS: ReadonlySet<keyof DroneTopics> = new Set([
+  "pointCloud",
+  "optimalTrajectory",
+  "goalPoint",
+  "path",
+]);
+
+/**
+ * Ensure every drone topic in `topics` has the correct `pickable` flag.
+ * Returns a patched copy only if something changed, otherwise returns undefined.
+ */
+function ensurePickableFlags(
+  topics: Record<string, Record<string, unknown>>,
+  droneId: string,
+): Record<string, Record<string, unknown>> | undefined {
+  const dt = droneTopics(droneId);
+  let changed = false;
+  const patched = { ...topics };
+
+  for (const field of TOPIC_FIELDS) {
+    const topicName = dt[field];
+    const existing = patched[topicName] as Record<string, unknown> | undefined;
+    const shouldBePickable = !NON_PICKABLE_FIELDS.has(field);
+
+    if (existing == undefined) {
+      continue; // topic not in config yet, nothing to patch
+    }
+    if (shouldBePickable && existing.pickable !== undefined) {
+      // robotModel shouldn't have pickable: false
+      if (existing.pickable === false) {
+        patched[topicName] = { ...existing };
+        delete (patched[topicName] as Record<string, unknown>).pickable;
+        changed = true;
+      }
+    } else if (!shouldBePickable && existing.pickable !== false) {
+      patched[topicName] = { ...existing, pickable: false };
+      changed = true;
+    }
+  }
+
+  return changed ? patched : undefined;
+}
+
 /**
  * Re-key topic settings from one droneId to another.
  *
@@ -59,7 +103,10 @@ function remapTopics(
   // Ensure all target topics exist (in case the old config was missing some).
   for (const field of TOPIC_FIELDS) {
     if (!(to[field] in result)) {
-      result[to[field]] = { visible: true };
+      result[to[field]] = {
+        visible: true,
+        ...(field !== "robotModel" ? { pickable: false } : {}),
+      };
     }
   }
 
@@ -79,6 +126,40 @@ export function useActiveDroneRouting(): void {
   );
 
   const prevDroneIdRef = useRef<string | undefined>(undefined);
+  const patchedRef = useRef(false);
+
+  // One-time patch: ensure pickable flags exist in cached layouts from older sessions
+  useEffect(() => {
+    if (patchedRef.current) {
+      return;
+    }
+    patchedRef.current = true;
+
+    const droneId = activeDroneId ?? DEFAULT_DRONE_ID;
+    const layoutState = getCurrentLayoutState();
+    const currentConfig = layoutState.selectedLayout?.data?.configById?.[PANEL_ID] as
+      | Record<string, unknown>
+      | undefined;
+    if (!currentConfig) {
+      return;
+    }
+
+    const topics = (currentConfig.topics ?? {}) as Record<string, Record<string, unknown>>;
+    const patched = ensurePickableFlags(topics, droneId);
+    if (patched) {
+      savePanelConfigs({
+        configs: [
+          {
+            id: PANEL_ID,
+            override: true,
+            config: { ...currentConfig, topics: patched },
+          },
+        ],
+      });
+    }
+  }, [activeDroneId, getCurrentLayoutState, savePanelConfigs]);
+
+  // Active drone switch: remap topics
 
   useEffect(() => {
     if (activeDroneId == undefined) {

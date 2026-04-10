@@ -54,11 +54,18 @@ export const defaultLayout: LayoutData =
         },
         followTf: TOPIC_CONFIG.followTf,
         followMode: "follow-position",
-        scene: {},
+        scene: {
+          transforms: {
+            axisScale: 0,
+            showLabel: false,
+            lineWidth: 0,
+          },
+        },
         transforms: {},
         topics: {
           [TOPIC_CONFIG.subscribe.pointCloud]: {
             visible: true,
+            pickable: false,
             colorField: "intensity",
             colorMode: "colormap",
             colorMap: "rainbow",
@@ -68,15 +75,18 @@ export const defaultLayout: LayoutData =
           },
           [TOPIC_CONFIG.subscribe.optimalTrajectory]: {
             visible: true,
+            pickable: false,
           },
           [TOPIC_CONFIG.subscribe.goalPoint]: {
             visible: true,
+            pickable: false,
           },
           [TOPIC_CONFIG.subscribe.robotModel]: {
             visible: true,
           },
           [TOPIC_CONFIG.subscribe.path]: {
             visible: true,
+            pickable: false,
             type: "line",
             lineWidth: 0.05,
             gradient: ["#4fc3f7", "rgba(79, 195, 247, 0.8)"],

@@ -88,7 +88,7 @@ import {
   TransformStamped,
   Vector3,
 } from "./ros";
-import { SelectEntry } from "./settings";
+import { BaseSettings, SelectEntry } from "./settings";
 import {
   AddTransformResult,
   CoordinateFrame,
@@ -1405,6 +1405,24 @@ export class Renderer extends EventEmitter<RendererEvents> implements IRenderer 
     this.animationFrame();
   };
 
+  /**
+   * Hide all renderables that are not pickable so they are excluded from the GPU
+   * pick pass entirely.  Returns the list of renderables whose visibility was
+   * changed so the caller can restore them afterwards.
+   */
+  #hideNonPickableRenderables(): Renderable[] {
+    const hidden: Renderable[] = [];
+    for (const extension of this.sceneExtensions.values()) {
+      for (const renderable of extension.renderables.values()) {
+        if (renderable.visible && !this.#isRenderablePickable(renderable)) {
+          renderable.visible = false;
+          hidden.push(renderable);
+        }
+      }
+    }
+    return hidden;
+  }
+
   #clickHandler = (cursorCoords: THREE.Vector2): void => {
     if (!this.#pickingEnabled) {
       this.setSelectedRenderable(undefined);
@@ -1420,27 +1438,36 @@ export class Renderer extends EventEmitter<RendererEvents> implements IRenderer 
     // the scene to update the render lists
     this.setSelectedRenderable(undefined);
 
-    // Pick a single renderable, hide it, re-render, and run picking again until
-    // the backdrop is hit or we exceed MAX_SELECTIONS
+    // Temporarily hide non-pickable renderables so the GPU pick pass skips them
+    // entirely — no need to peel through thick point cloud layers one by one.
+    const nonPickableHidden = this.#hideNonPickableRenderables();
+
     const camera = this.cameraHandler.getActiveCamera();
+    // Re-render with non-pickable objects hidden so the pick framebuffer is clean
+    this.gl.render(this.#scene, camera);
+
     const selections: PickedRenderable[] = [];
+    const pickHidden: Renderable[] = [];
     let curSelection: PickedRenderable | undefined;
     while (
       (curSelection = this.#pickSingleObject(cursorCoords)) &&
-      selections.length < MAX_SELECTIONS
+      pickHidden.length < MAX_SELECTIONS
     ) {
       selections.push(curSelection);
-      // If debugPicking is on, we don't want to overwrite the hitmap by doing more iterations
       if (this.debugPicking) {
         break;
       }
       curSelection.renderable.visible = false;
+      pickHidden.push(curSelection.renderable);
       this.gl.render(this.#scene, camera);
     }
 
-    // Put everything back to normal and render one last frame
-    for (const selection of selections) {
-      selection.renderable.visible = true;
+    // Restore visibility — pick-hidden first, then non-pickable
+    for (const renderable of pickHidden) {
+      renderable.visible = true;
+    }
+    for (const renderable of nonPickableHidden) {
+      renderable.visible = true;
     }
     if (!this.debugPicking) {
       this.animationFrame();
@@ -1459,19 +1486,28 @@ export class Renderer extends EventEmitter<RendererEvents> implements IRenderer 
       return;
     }
 
+    const nonPickableHidden = this.#hideNonPickableRenderables();
+
     const camera = this.cameraHandler.getActiveCamera();
+    this.gl.render(this.#scene, camera);
+
     const selections: PickedRenderable[] = [];
+    const pickHidden: Renderable[] = [];
     let curSelection: PickedRenderable | undefined;
     while (
       (curSelection = this.#pickSingleObject(cursorCoords)) &&
-      selections.length < MAX_SELECTIONS
+      pickHidden.length < MAX_SELECTIONS
     ) {
       selections.push(curSelection);
       curSelection.renderable.visible = false;
+      pickHidden.push(curSelection.renderable);
       this.gl.render(this.#scene, camera);
     }
-    for (const selection of selections) {
-      selection.renderable.visible = true;
+    for (const renderable of pickHidden) {
+      renderable.visible = true;
+    }
+    for (const renderable of nonPickableHidden) {
+      renderable.visible = true;
     }
     this.animationFrame();
     this.emit("renderableHovered", selections, cursorCoords, this);
@@ -1563,6 +1599,34 @@ export class Renderer extends EventEmitter<RendererEvents> implements IRenderer 
     // Update the Custom Layers node label with the number of custom layers
     this.updateCustomLayersCount();
   };
+
+  /**
+   * Check if a picked renderable is allowed to be selected based on its topic or
+   * transform config. Returns false when the config sets `pickable: false`.
+   */
+  #isRenderablePickable(renderable: Renderable): boolean {
+    const { topic } = renderable.userData;
+    if (topic != undefined) {
+      const topicSettings = this.config.topics[topic] as Partial<BaseSettings> | undefined;
+      if (topicSettings?.pickable === false) {
+        return false;
+      }
+    }
+
+    // TF frame axes have no topic — default to non-pickable unless explicitly opted in
+    const settingsPath = renderable.userData.settingsPath;
+    if (settingsPath[0] === "transforms" && settingsPath[1] != undefined) {
+      const frameKey = settingsPath[1] as string;
+      const frameSettings = this.config.transforms[frameKey] as
+        | Partial<BaseSettings>
+        | undefined;
+      if (frameSettings?.pickable !== true) {
+        return false;
+      }
+    }
+
+    return true;
+  }
 
   #pickSingleObject(cursorCoords: THREE.Vector2): PickedRenderable | undefined {
     // Render a single pixel using a fragment shader that writes object IDs as

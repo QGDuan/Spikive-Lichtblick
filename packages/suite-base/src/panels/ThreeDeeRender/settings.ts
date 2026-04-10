@@ -21,6 +21,8 @@ export type BaseSettings = {
   /** If true, always use `currentTime` for pose updates. This means objects in a coordinate frame
    * will move as the coordinate frame moves. */
   frameLocked?: boolean;
+  /** Whether objects from this topic participate in picking (click selection). Defaults to true. */
+  pickable?: boolean;
 };
 
 export type LayerSettingsEntity = BaseSettings & {
