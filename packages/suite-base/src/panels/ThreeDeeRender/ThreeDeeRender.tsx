@@ -964,12 +964,11 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
             publishActive={publishActive}
             onClickPublish={onClickPublish}
             onShowTopicSettings={onShowTopicSettings}
-            publishClickType={renderer?.publishClickTool.publishClickType ?? "point"}
-            onChangePublishClickType={(type) => {
-              renderer?.publishClickTool.setPublishClickType(type);
-              renderer?.publishClickTool.start();
-            }}
             timezone={timezone}
+            publish={context.publish}
+            advertise={context.advertise}
+            unadvertise={context.unadvertise}
+            dataSourceProfile={context.dataSourceProfile}
           />
         </RendererContext.Provider>
       </div>

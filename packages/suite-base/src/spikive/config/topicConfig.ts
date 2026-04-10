@@ -54,6 +54,28 @@ export function droneBodyFrame(droneId: string | number): string {
 }
 
 // ---------------------------------------------------------------------------
+// Drone ID extraction utility
+// ---------------------------------------------------------------------------
+/** Extract the drone numeric ID from a fully-qualified drone topic string. */
+export function extractDroneIdFromTopic(topic: string): string | undefined {
+  const match = /^\/drone_(\w+)_/.exec(topic);
+  return match?.[1];
+}
+
+// ---------------------------------------------------------------------------
+// Control topic & command codes
+// ---------------------------------------------------------------------------
+export const CONTROL_TOPIC = "/control";
+
+export const DRONE_COMMANDS = {
+  TAKEOFF: 1,
+  LAND: 2,
+  RETURN: 3,
+  CONTINUE: 4,
+  STOP: 5,
+} as const;
+
+// ---------------------------------------------------------------------------
 // Publish topics (outbound, not drone-prefixed for now)
 // ---------------------------------------------------------------------------
 const PUBLISH_TOPICS = {

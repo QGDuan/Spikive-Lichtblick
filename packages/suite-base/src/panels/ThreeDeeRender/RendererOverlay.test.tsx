@@ -95,14 +95,12 @@ describe("<RendererOverlay /> hover wiring", () => {
           enableStats={false}
           interfaceMode="3d"
           measureActive={false}
-          onChangePublishClickType={jest.fn()}
           onClickMeasure={jest.fn()}
           onClickPublish={jest.fn()}
           onShowTopicSettings={jest.fn()}
           onTogglePerspective={jest.fn()}
           perspective={false}
           publishActive={false}
-          publishClickType="point"
           timezone={undefined}
         />
       </ThemeProvider>,

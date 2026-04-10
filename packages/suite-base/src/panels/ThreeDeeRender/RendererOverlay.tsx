@@ -9,28 +9,20 @@ import { Ruler20Filled, Ruler20Regular } from "@fluentui/react-icons";
 import {
   Button,
   IconButton,
-  ListItemIcon,
-  ListItemText,
-  Menu,
-  MenuItem,
   Paper,
   Tooltip,
-  useTheme,
 } from "@mui/material";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLongPress } from "react-use";
 import tc from "tinycolor2";
 import { makeStyles } from "tss-react/mui";
 
+import type { MessageDefinition } from "@lichtblick/message-definition";
 import { LayoutActions } from "@lichtblick/suite";
 import {
   PanelContextMenu,
   PanelContextMenuItem,
 } from "@lichtblick/suite-base/components/PanelContextMenu";
-import PublishGoalIcon from "@lichtblick/suite-base/components/PublishGoalIcon";
-import PublishPointIcon from "@lichtblick/suite-base/components/PublishPointIcon";
-import PublishPoseEstimateIcon from "@lichtblick/suite-base/components/PublishPoseEstimateIcon";
 import { usePanelMousePresence } from "@lichtblick/suite-base/hooks/usePanelMousePresence";
 import { HUD } from "@lichtblick/suite-base/panels/ThreeDeeRender/HUD";
 import { customTypography } from "@lichtblick/theme";
@@ -43,14 +35,7 @@ import { Renderable } from "./Renderable";
 import { useRenderer, useRendererEvent } from "./RendererContext";
 import { Stats } from "./Stats";
 import { MouseEventObject } from "./camera";
-import { PublishClickType } from "./renderables/PublishClickTool";
 import { InterfaceMode } from "./types";
-
-const PublishClickIcons: Record<PublishClickType, React.ReactNode> = {
-  pose: <PublishGoalIcon fontSize="small" />,
-  point: <PublishPointIcon fontSize="small" />,
-  pose_estimate: <PublishPoseEstimateIcon fontSize="small" />,
-};
 
 const useStyles = makeStyles()((theme) => ({
   root: {
@@ -105,15 +90,18 @@ type Props = {
   enableStats: boolean;
   interfaceMode: InterfaceMode;
   measureActive: boolean;
-  onChangePublishClickType: (_: PublishClickType) => void;
   onClickMeasure: () => void;
   onClickPublish: () => void;
   onShowTopicSettings: (topic: string) => void;
   onTogglePerspective: () => void;
   perspective: boolean;
   publishActive: boolean;
-  publishClickType: PublishClickType;
   timezone: string | undefined;
+  // Publish context forwarded to DroneControlPanel via Interactions
+  publish?: (topic: string, message: unknown) => void;
+  advertise?: (topic: string, schemaName: string, options?: { datatypes: Map<string, MessageDefinition> }) => void;
+  unadvertise?: (topic: string) => void;
+  dataSourceProfile?: string;
 };
 
 /**
@@ -319,95 +307,6 @@ export function RendererOverlay(props: Props): React.JSX.Element {
     renderer?.setSelectedRenderable(selectedRenderable);
   }, [renderer, selectedRenderable]);
 
-  const publickClickButtonRef = useRef<HTMLButtonElement>(ReactNull);
-  const [publishMenuExpanded, setPublishMenuExpanded] = useState(false);
-  const selectedPublishClickIcon = PublishClickIcons[props.publishClickType];
-
-  const onLongPressPublish = useCallback(() => {
-    setPublishMenuExpanded(true);
-  }, []);
-  const longPressPublishEvent = useLongPress(onLongPressPublish);
-
-  const theme = useTheme();
-
-  // Publish control is only available if the canPublish prop is true and we have a fixed frame in the renderer
-  const showPublishControl =
-    props.interfaceMode === "3d" && props.canPublish && renderer?.fixedFrameId != undefined;
-  const publishControls = showPublishControl && (
-    <>
-      <Tooltip
-        placement="left"
-        title={props.publishActive ? "Click to cancel" : "Click to publish"}
-      >
-        <IconButton
-          {...longPressPublishEvent}
-          className={classes.iconButton}
-          size="small"
-          color={props.publishActive ? "info" : "inherit"}
-          ref={publickClickButtonRef}
-          onClick={props.onClickPublish}
-          data-testid="publish-button"
-        >
-          {selectedPublishClickIcon}
-          <div
-            style={{
-              borderBottom: "6px solid currentColor",
-              borderRight: "6px solid transparent",
-              bottom: 0,
-              left: 0,
-              height: 0,
-              width: 0,
-              margin: theme.spacing(0.25),
-              position: "absolute",
-            }}
-          />
-        </IconButton>
-      </Tooltip>
-      <Menu
-        id="publish-menu"
-        anchorEl={publickClickButtonRef.current}
-        anchorOrigin={{ vertical: "top", horizontal: "left" }}
-        transformOrigin={{ vertical: "top", horizontal: "right" }}
-        open={publishMenuExpanded}
-        onClose={() => {
-          setPublishMenuExpanded(false);
-        }}
-        slotProps={{ list: { dense: true } }}
-      >
-        <MenuItem
-          selected={props.publishClickType === "pose_estimate"}
-          onClick={() => {
-            props.onChangePublishClickType("pose_estimate");
-            setPublishMenuExpanded(false);
-          }}
-        >
-          <ListItemIcon>{PublishClickIcons.pose_estimate}</ListItemIcon>
-          <ListItemText disableTypography>Publish pose estimate</ListItemText>
-        </MenuItem>
-        <MenuItem
-          selected={props.publishClickType === "pose"}
-          onClick={() => {
-            props.onChangePublishClickType("pose");
-            setPublishMenuExpanded(false);
-          }}
-        >
-          <ListItemIcon>{PublishClickIcons.pose}</ListItemIcon>
-          <ListItemText disableTypography>Publish pose</ListItemText>
-        </MenuItem>
-        <MenuItem
-          selected={props.publishClickType === "point"}
-          onClick={() => {
-            props.onChangePublishClickType("point");
-            setPublishMenuExpanded(false);
-          }}
-        >
-          <ListItemIcon>{PublishClickIcons.point}</ListItemIcon>
-          <ListItemText disableTypography>Publish point</ListItemText>
-        </MenuItem>
-      </Menu>
-    </>
-  );
-
   const resetViewButton = showResetViewButton && (
     <Button
       className={classes.resetViewButton}
@@ -441,6 +340,13 @@ export function RendererOverlay(props: Props): React.JSX.Element {
               selectedObject={selectedObject}
               setInteractionsTabType={setInteractionsTabType}
               timezone={props.timezone}
+              onClickPublish={props.onClickPublish}
+              publishActive={props.publishActive}
+              canPublish={props.canPublish}
+              publish={props.publish}
+              advertise={props.advertise}
+              unadvertise={props.unadvertise}
+              dataSourceProfile={props.dataSourceProfile}
             />
           )
         }
@@ -480,8 +386,6 @@ export function RendererOverlay(props: Props): React.JSX.Element {
                 </div>
               </IconButton>
             </Tooltip>
-
-            {publishControls}
           </Paper>
         )}
       </div>

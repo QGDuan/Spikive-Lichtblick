@@ -17,14 +17,15 @@
 import { Cursor20Regular } from "@fluentui/react-icons";
 import { Typography } from "@mui/material";
 
+import type { MessageDefinition } from "@lichtblick/message-definition";
 import type { LayoutActions } from "@lichtblick/suite";
 import ExpandingToolbar, {
   ToolGroup,
   ToolGroupFixedSizePane,
 } from "@lichtblick/suite-base/components/ExpandingToolbar";
+import { DroneControlPanel } from "@lichtblick/suite-base/spikive/components/DroneControlPanel";
+import { extractDroneIdFromTopic } from "@lichtblick/suite-base/spikive/config/topicConfig";
 
-import ObjectDetails from "./ObjectDetails";
-import TopicLink from "./TopicLink";
 import { InteractionData } from "./types";
 import { Pose } from "../transforms";
 
@@ -46,19 +47,31 @@ type Props = {
   selectedObject?: SelectionObject;
   setInteractionsTabType: (arg0?: TabType) => void;
   timezone: string | undefined;
+  // Publish-related props forwarded to DroneControlPanel
+  onClickPublish: () => void;
+  publishActive: boolean;
+  canPublish: boolean;
+  publish?: (topic: string, message: unknown) => void;
+  advertise?: (topic: string, schemaName: string, options?: { datatypes: Map<string, MessageDefinition> }) => void;
+  unadvertise?: (topic: string) => void;
+  dataSourceProfile?: string;
 };
 
 const InteractionsBaseComponent = React.memo<Props>(function InteractionsBaseComponent({
-  addPanel,
   selectedObject,
   interactionsTabType,
-  onShowTopicSettings,
   setInteractionsTabType,
-  timezone,
+  onClickPublish,
+  publishActive,
+  canPublish,
+  publish,
+  advertise,
+  unadvertise,
+  dataSourceProfile,
 }: Props) {
   const selectedInteractionData = selectedObject?.object.interactionData;
-  const originalMessage = selectedInteractionData?.originalMessage;
-  const instanceDetails = selectedInteractionData?.instanceDetails;
+  const topic = selectedInteractionData?.topic;
+  const droneId = topic != undefined ? extractDroneIdFromTopic(topic) : undefined;
 
   return (
     <ExpandingToolbar
@@ -71,26 +84,17 @@ const InteractionsBaseComponent = React.memo<Props>(function InteractionsBaseCom
     >
       <ToolGroup name={OBJECT_TAB_TYPE}>
         <ToolGroupFixedSizePane>
-          {originalMessage ? (
-            <>
-              {selectedInteractionData.topic && (
-                <TopicLink
-                  addPanel={addPanel}
-                  onShowTopicSettings={onShowTopicSettings}
-                  topic={selectedInteractionData.topic}
-                />
-              )}
-              {instanceDetails ? (
-                <ObjectDetails selectedObject={instanceDetails} timezone={timezone} />
-              ) : (
-                <></>
-              )}
-              <ObjectDetails
-                selectedObject={originalMessage}
-                interactionData={selectedInteractionData}
-                timezone={timezone}
-              />
-            </>
+          {droneId != undefined ? (
+            <DroneControlPanel
+              droneId={droneId}
+              onClickPublish={onClickPublish}
+              publishActive={publishActive}
+              canPublish={canPublish}
+              publish={publish}
+              advertise={advertise}
+              unadvertise={unadvertise}
+              dataSourceProfile={dataSourceProfile}
+            />
           ) : (
             <Typography variant="body2" color="text.disabled" gutterBottom>
               Click an object in the 3D view to select it.
