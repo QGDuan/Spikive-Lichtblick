@@ -76,3 +76,26 @@ export function makePoseEstimateMessage(
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// quadrotor_msgs/GoalSet  (used by EGO-Planner)
+// ---------------------------------------------------------------------------
+export const GoalSetDatatypes = new Map<string, MessageDefinition>([
+  [
+    "quadrotor_msgs/GoalSet",
+    {
+      name: "quadrotor_msgs/GoalSet",
+      definitions: [
+        { type: "int16", name: "drone_id", isComplex: false, isArray: false },
+        { type: "float32", name: "goal", isComplex: false, isArray: true, arrayLength: 3 },
+      ],
+    },
+  ],
+]);
+
+export function makeGoalSetMessage(droneId: number, position: Point): unknown {
+  return {
+    drone_id: droneId,
+    goal: [position.x, position.y, position.z],
+  };
+}

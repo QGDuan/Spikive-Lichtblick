@@ -3,7 +3,7 @@
 
 import { create } from "zustand";
 
-import { MultiRobotStore } from "./types";
+import { ConnectionStatus, MultiRobotStore } from "./types";
 
 function normalizeUrl(url: string): string {
   return url.trim().replace(/\/+$/, "").toLowerCase();
@@ -62,6 +62,14 @@ export const useRobotConnectionsStore = create<MultiRobotStore>((set, get) => ({
   toggleVisibility: (id: string) => {
     set((state) => ({
       robots: state.robots.map((r) => (r.id === id ? { ...r, isVisible: !r.isVisible } : r)),
+    }));
+  },
+
+  updateStatus: (id: string, status: ConnectionStatus, latencyMs?: number) => {
+    set((state) => ({
+      robots: state.robots.map((r) =>
+        r.id === id ? { ...r, status, latencyMs } : r,
+      ),
     }));
   },
 }));

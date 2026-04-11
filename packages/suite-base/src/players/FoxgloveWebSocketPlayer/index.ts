@@ -1106,6 +1106,8 @@ export default class FoxgloveWebSocketPlayer implements Player {
       throw new Error(`Tried to publish on topic '${topic}' that has not been advertised before.`);
     }
 
+    log.info(`[publish] topic=${topic}, encoding=${clientChannel.encoding}, msg=${JSON.stringify(msg)}`);
+
     if (clientChannel.encoding === "json") {
       // Ensure that typed arrays are encoded as arrays and not objects.
       const replacer = (_key: string, value: unknown) => {
@@ -1256,6 +1258,7 @@ export default class FoxgloveWebSocketPlayer implements Player {
 
   #advertiseChannel(publication: AdvertiseOptions) {
     if (!this.#client) {
+      log.warn(`[advertiseChannel] No client, skipping advertise for ${publication.topic}`);
       return;
     }
 
@@ -1302,6 +1305,7 @@ export default class FoxgloveWebSocketPlayer implements Player {
     }
 
     const channelId = this.#client.advertise({ topic, encoding, schemaName });
+    log.info(`[advertiseChannel] Advertised ${topic} (schema=${schemaName}, encoding=${encoding}, channelId=${channelId})`);
     this.#publicationsByTopic.set(topic, {
       id: channelId,
       topic,

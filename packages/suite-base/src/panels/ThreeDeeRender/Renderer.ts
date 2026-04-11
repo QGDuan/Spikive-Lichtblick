@@ -1058,6 +1058,19 @@ export class Renderer extends EventEmitter<RendererEvents> implements IRenderer 
     }
   }
 
+  /** Return the topic and message details of the currently selected renderable, if any. */
+  public getSelectedRenderableInfo():
+    | { topic?: string; details?: Record<string, unknown> }
+    | undefined {
+    if (!this.#selectedRenderable) {
+      return undefined;
+    }
+    return {
+      topic: this.#selectedRenderable.renderable.topic,
+      details: this.#selectedRenderable.renderable.details() as Record<string, unknown>,
+    };
+  }
+
   private queueByKey(
     groups: Map<string, MessageEvent[]>,
     subscriptions: Map<string, RendererSubscription[]>,

@@ -5,6 +5,7 @@ import CloseIcon from "@mui/icons-material/Close";
 import {
   Alert,
   Button,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -41,7 +42,7 @@ function validateUrl(url: string): string | undefined {
 type AddRobotDialogProps = {
   open: boolean;
   onClose: () => void;
-  onConnect: (url: string, droneId: string) => { success: boolean; error?: string };
+  onConnect: (url: string, droneId: string) => Promise<{ success: boolean; error?: string }>;
 };
 
 export function AddRobotDialog({
@@ -53,6 +54,7 @@ export function AddRobotDialog({
   const [droneId, setDroneId] = useState("1");
   const [url, setUrl] = useState("ws://192.168.1.10:8765");
   const [error, setError] = useState<string | undefined>();
+  const [connecting, setConnecting] = useState(false);
 
   const handleDroneIdChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setDroneId(e.target.value);
@@ -64,7 +66,7 @@ export function AddRobotDialog({
     setError(undefined);
   }, []);
 
-  const handleConnect = useCallback(() => {
+  const handleConnect = useCallback(async () => {
     const droneIdError = validateDroneId(droneId);
     if (droneIdError) {
       setError(droneIdError);
@@ -77,33 +79,41 @@ export function AddRobotDialog({
       return;
     }
 
-    const result = onConnect(url, droneId);
+    setConnecting(true);
+    setError(undefined);
 
-    if (result.success) {
-      setDroneId("1");
-      setUrl("ws://192.168.1.10:8765");
-      setError(undefined);
-      onClose();
-    } else {
-      setError(result.error ?? "Connection failed");
+    try {
+      const result = await onConnect(url, droneId);
+
+      if (result.success) {
+        setDroneId("1");
+        setUrl("ws://192.168.1.10:8765");
+        setError(undefined);
+        onClose();
+      } else {
+        setError(result.error ?? "Connection failed");
+      }
+    } finally {
+      setConnecting(false);
     }
   }, [droneId, url, onConnect, onClose]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === "Enter") {
-        handleConnect();
+      if (e.key === "Enter" && !connecting) {
+        void handleConnect();
       }
     },
-    [handleConnect],
+    [handleConnect, connecting],
   );
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
+    <Dialog open={open} onClose={connecting ? undefined : onClose} maxWidth="xs" fullWidth>
       <DialogTitle sx={{ pr: 6 }}>
         Add Robot
         <IconButton
           onClick={onClose}
+          disabled={connecting}
           sx={{ position: "absolute", right: 8, top: 8, color: "text.secondary" }}
         >
           <CloseIcon />
@@ -122,6 +132,7 @@ export function AddRobotDialog({
           value={droneId}
           onChange={handleDroneIdChange}
           onKeyDown={handleKeyDown}
+          disabled={connecting}
           fullWidth
           size="small"
           autoFocus
@@ -133,19 +144,22 @@ export function AddRobotDialog({
           value={url}
           onChange={handleUrlChange}
           onKeyDown={handleKeyDown}
+          disabled={connecting}
           fullWidth
           size="small"
         />
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>
+        <Button onClick={onClose} disabled={connecting}>
           Cancel
         </Button>
         <Button
           variant="contained"
-          onClick={handleConnect}
+          onClick={() => { void handleConnect(); }}
+          disabled={connecting}
+          startIcon={connecting ? <CircularProgress size={16} /> : undefined}
         >
-          Connect
+          {connecting ? "Connecting…" : "Connect"}
         </Button>
       </DialogActions>
     </Dialog>

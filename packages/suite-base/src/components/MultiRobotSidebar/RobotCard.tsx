@@ -28,6 +28,7 @@ import { ConnectionStatus, RobotEntry } from "./types";
 const STATUS_COLORS: Record<ConnectionStatus, string> = {
   connecting: "#FFA726",
   connected: "#66BB6A",
+  slow: "#FFA726",
   disconnected: "#BDBDBD",
   error: "#EF5350",
 };
@@ -89,9 +90,31 @@ export function RobotCard({
           </IconButton>
         </Tooltip>
       </div>
-      <Typography variant="caption" color="text.secondary" noWrap title={robot.url} sx={{ px: 1 }}>
-        {robot.url}
-      </Typography>
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", px: 1 }}>
+        <Typography variant="caption" color="text.secondary" noWrap title={robot.url} sx={{ flex: 1, minWidth: 0 }}>
+          {robot.url}
+        </Typography>
+        <Typography
+          variant="caption"
+          sx={{
+            ml: 1,
+            flexShrink: 0,
+            color: robot.status === "disconnected" || robot.status === "error"
+              ? "#EF5350"
+              : robot.status === "slow"
+                ? "#FFA726"
+                : "text.secondary",
+            fontFamily: "monospace",
+            fontSize: "0.65rem",
+          }}
+        >
+          {robot.status === "disconnected" || robot.status === "error"
+            ? "Disconnected"
+            : robot.latencyMs != undefined
+              ? `${robot.latencyMs}ms`
+              : ""}
+        </Typography>
+      </Box>
       <div className={classes.actions}>
         <Tooltip title={robot.isVisible ? "Hide visualization" : "Show visualization"}>
           <IconButton className={classes.actionButton} onClick={handleToggleVisibility} size="small">

@@ -93,7 +93,7 @@ export const defaultLayout: LayoutData =
           },
         },
         publish: {
-          type: "pose_estimate",
+          type: "pose",
           poseTopic: TOPIC_CONFIG.publish.goalPose,
           pointTopic: TOPIC_CONFIG.publish.clickedPoint,
           poseEstimateTopic: TOPIC_CONFIG.publish.initialPose,

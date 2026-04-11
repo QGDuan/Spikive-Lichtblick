@@ -31,6 +31,7 @@ import {
   DEFAULT_FOLLOW_MODE,
   PANEL_STYLE,
 } from "@lichtblick/suite-base/panels/ThreeDeeRender/constants";
+import { TOPIC_CONFIG } from "@lichtblick/suite-base/spikive/config/topicConfig";
 import ThemeProvider from "@lichtblick/suite-base/theme/ThemeProvider";
 
 import type { IRenderer, ImageModeConfig, RendererConfig, RendererSubscription } from "./IRenderer";
@@ -44,8 +45,10 @@ import { useStyles } from "./ThreeDeeRender.style";
 import { CameraState, DEFAULT_CAMERA_STATE } from "./camera";
 import { MAX_TRANSFORM_MESSAGES } from "./constants";
 import {
+  GoalSetDatatypes,
   PublishRos1Datatypes,
   PublishRos2Datatypes,
+  makeGoalSetMessage,
   makePointMessage,
   makePoseEstimateMessage,
   makePoseMessage,
@@ -792,6 +795,9 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
   }, [measureActive, renderer]);
 
   const [publishActive, setPublishActive] = useState(false);
+  // Spikive: lock the drone ID from the selected object when publish starts,
+  // so subsequent clicks (place-first-point, place-second-point) don't change it.
+  const publishDroneIdRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (renderer?.publishClickTool.publishClickType !== config.publish.type) {
       renderer?.publishClickTool.setPublishClickType(config.publish.type);
@@ -816,11 +822,17 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
     context.advertise?.(publishTopics.pose, "geometry_msgs/PoseWithCovarianceStamped", {
       datatypes,
     });
+    // Spikive: advertise GoalSet for EGO-Planner waypoint routing
+    const goalWithIdTopic = TOPIC_CONFIG.publish.goalWithId;
+    context.advertise?.(goalWithIdTopic, "quadrotor_msgs/GoalSet", {
+      datatypes: GoalSetDatatypes,
+    });
 
     return () => {
       context.unadvertise?.(publishTopics.goal);
       context.unadvertise?.(publishTopics.point);
       context.unadvertise?.(publishTopics.pose);
+      context.unadvertise?.(goalWithIdTopic);
     };
   }, [publishTopics, context, context.dataSourceProfile]);
 
@@ -828,6 +840,10 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
 
   useEffect(() => {
     const onStart = () => {
+      // Lock the drone ID from the currently selected Marker's `id` field at publish start
+      const info = renderer?.getSelectedRenderableInfo();
+      const markerId = info?.details?.id;
+      publishDroneIdRef.current = markerId != null ? String(markerId) : undefined;
       setPublishActive(true);
     };
     const onSubmit = (event: PublishClickEventMap["foxglove.publish-submit"]) => {
@@ -836,7 +852,7 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
         log.warn("Unable to publish, renderFrameId is not set");
         return;
       }
-      if (!context.publish) {
+      if (!context.publish || !context.advertise) {
         log.error("Data source does not support publishing");
         return;
       }
@@ -844,6 +860,18 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
         log.warn("Publishing is only supported in ros1 and ros2");
         return;
       }
+
+      // Ensure topics are advertised before publishing (defensive re-advertise)
+      const datatypes =
+        context.dataSourceProfile === "ros2" ? PublishRos2Datatypes : PublishRos1Datatypes;
+      context.advertise(publishTopics.goal, "geometry_msgs/PoseStamped", { datatypes });
+      context.advertise(publishTopics.point, "geometry_msgs/PointStamped", { datatypes });
+      context.advertise(publishTopics.pose, "geometry_msgs/PoseWithCovarianceStamped", {
+        datatypes,
+      });
+      context.advertise(TOPIC_CONFIG.publish.goalWithId, "quadrotor_msgs/GoalSet", {
+        datatypes: GoalSetDatatypes,
+      });
 
       try {
         switch (event.publishClickType) {
@@ -855,6 +883,22 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
           case "pose": {
             const message = makePoseMessage(event.pose, frameId);
             context.publish(publishTopics.goal, message);
+
+            // Spikive: publish GoalSet to /goal_with_id for EGO-Planner
+            // drone_id was locked from the selected object's topic at publish start
+            const droneIdStr = publishDroneIdRef.current;
+            if (droneIdStr != undefined) {
+              const goalSetMsg = makeGoalSetMessage(
+                Number(droneIdStr),
+                event.pose.position,
+              );
+              log.info(
+                `Publishing GoalSet to ${TOPIC_CONFIG.publish.goalWithId}: drone_id=${droneIdStr}, goal=[${event.pose.position.x}, ${event.pose.position.y}, ${event.pose.position.z}]`,
+              );
+              context.publish(TOPIC_CONFIG.publish.goalWithId, goalSetMsg);
+            } else {
+              log.warn("No selected object topic to extract drone_id, skipping GoalSet publish");
+            }
             break;
           }
           case "pose_estimate": {

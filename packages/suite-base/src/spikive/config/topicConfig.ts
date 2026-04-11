@@ -80,6 +80,7 @@ export const DRONE_COMMANDS = {
 // ---------------------------------------------------------------------------
 const PUBLISH_TOPICS = {
   goalPose: "/move_base_simple/goal",
+  goalWithId: "/goal_with_id",
   clickedPoint: "/clicked_point",
   initialPose: "/initialpose",
 } as const;

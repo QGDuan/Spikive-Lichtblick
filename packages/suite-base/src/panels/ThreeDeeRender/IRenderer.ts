@@ -363,6 +363,8 @@ export interface IRenderer extends EventEmitter<RendererEvents> {
   resetView(): void;
 
   setSelectedRenderable(selection: PickedRenderable | undefined): void;
+  /** Return the topic and message details of the currently selected renderable, if any. */
+  getSelectedRenderableInfo(): { topic?: string; details?: Record<string, unknown> } | undefined;
 
   addMessageEvent(
     messageEvent: Readonly<MessageEvent>,

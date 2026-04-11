@@ -13,6 +13,44 @@ import { AddRobotDialog } from "./AddRobotDialog";
 import { useStyles } from "./MultiRobotSidebar.style";
 import { RobotCard } from "./RobotCard";
 import { useRobotConnectionsStore } from "./useRobotConnections";
+import { useWebSocketMonitor } from "./useWebSocketMonitor";
+
+const WS_PROBE_TIMEOUT_MS = 3000;
+const WS_SUB_PROTOCOLS = ["foxglove.websocket.v1"];
+
+/** Try a WebSocket handshake. Resolves on open, rejects on error/timeout. */
+function probeWebSocket(url: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const ws = new WebSocket(url, WS_SUB_PROTOCOLS);
+
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        ws.close();
+        reject(new Error("Connection timed out"));
+      }
+    }, WS_PROBE_TIMEOUT_MS);
+
+    ws.onopen = () => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        ws.close();
+        resolve();
+      }
+    };
+
+    ws.onerror = () => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        ws.close();
+        reject(new Error("Unable to connect to WebSocket server"));
+      }
+    };
+  });
+}
 
 export function MultiRobotSidebar(): React.JSX.Element {
   const { classes } = useStyles();
@@ -20,6 +58,7 @@ export function MultiRobotSidebar(): React.JSX.Element {
   const { selectSource } = usePlayerSelection();
 
   useActiveDroneRouting();
+  useWebSocketMonitor();
 
   const robots = useRobotConnectionsStore((s) => s.robots);
   const addRobot = useRobotConnectionsStore((s) => s.addRobot);
@@ -28,7 +67,17 @@ export function MultiRobotSidebar(): React.JSX.Element {
   const removeRobot = useRobotConnectionsStore((s) => s.removeRobot);
 
   const handleConnect = useCallback(
-    (url: string, droneId: string) => {
+    async (url: string, droneId: string): Promise<{ success: boolean; error?: string }> => {
+      // Pre-flight: verify the WebSocket is reachable before adding a card
+      try {
+        await probeWebSocket(url.trim());
+      } catch (err) {
+        return {
+          success: false,
+          error: err instanceof Error ? err.message : "Connection failed",
+        };
+      }
+
       const result = addRobot(url, droneId);
       if (result.success) {
         selectSource("foxglove-websocket", {
