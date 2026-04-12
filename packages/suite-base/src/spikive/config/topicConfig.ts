@@ -20,6 +20,7 @@ const BASE_TOPICS = {
   goalPoint: "ego_planner_node/goal_point",
   robotModel: "odom_visualization/robot",
   path: "odom_visualization/path",
+  odom: "visual_slam/odom",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -31,6 +32,7 @@ export type DroneTopics = {
   goalPoint: string;
   robotModel: string;
   path: string;
+  odom: string;
 };
 
 /** Build fully-qualified topic names for a given drone ID. */
@@ -42,6 +44,7 @@ export function droneTopics(droneId: string | number): DroneTopics {
     goalPoint: `/drone_${id}_${BASE_TOPICS.goalPoint}`,
     robotModel: `/drone_${id}_${BASE_TOPICS.robotModel}`,
     path: `/drone_${id}_${BASE_TOPICS.path}`,
+    odom: `/drone_${id}_${BASE_TOPICS.odom}`,
   };
 }
 
@@ -58,7 +61,7 @@ export function droneBodyFrame(droneId: string | number): string {
 // ---------------------------------------------------------------------------
 /** Extract the drone numeric ID from a fully-qualified drone topic string. */
 export function extractDroneIdFromTopic(topic: string): string | undefined {
-  const match = /^\/drone_(\w+)_/.exec(topic);
+  const match = /^\/drone_(\d+)_/.exec(topic);
   return match?.[1];
 }
 

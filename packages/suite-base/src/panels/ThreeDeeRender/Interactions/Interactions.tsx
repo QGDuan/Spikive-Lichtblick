@@ -16,6 +16,7 @@
 
 import { Cursor20Regular } from "@fluentui/react-icons";
 import { Typography } from "@mui/material";
+import { useRef } from "react";
 
 import type { MessageDefinition } from "@lichtblick/message-definition";
 import type { LayoutActions } from "@lichtblick/suite";
@@ -24,7 +25,9 @@ import ExpandingToolbar, {
   ToolGroupFixedSizePane,
 } from "@lichtblick/suite-base/components/ExpandingToolbar";
 import { DroneControlPanel } from "@lichtblick/suite-base/spikive/components/DroneControlPanel";
+import { WaypointPanel } from "@lichtblick/suite-base/spikive/components/WaypointPanel";
 import { extractDroneIdFromTopic } from "@lichtblick/suite-base/spikive/config/topicConfig";
+import { useSceneModeStore } from "@lichtblick/suite-base/spikive/stores/useSceneModeStore";
 
 import { InteractionData } from "./types";
 import { Pose } from "../transforms";
@@ -72,6 +75,18 @@ const InteractionsBaseComponent = React.memo<Props>(function InteractionsBaseCom
   const selectedInteractionData = selectedObject?.object.interactionData;
   const topic = selectedInteractionData?.topic;
   const droneId = topic != undefined ? extractDroneIdFromTopic(topic) : undefined;
+  const sceneMode = useSceneModeStore((s) => s.sceneMode);
+
+  // In mapping mode, remember the last selected droneId so the panel persists
+  // when the user clicks empty space (selectedObject → undefined).
+  const lastDroneIdRef = useRef<string | undefined>(undefined);
+  if (droneId != undefined) {
+    lastDroneIdRef.current = droneId;
+  }
+
+  const isMapping = sceneMode === "mapping-waypoint";
+  // In mapping mode, fall back to the remembered droneId when nothing is selected
+  const activeDroneId = droneId ?? (isMapping ? lastDroneIdRef.current : undefined);
 
   return (
     <ExpandingToolbar
@@ -84,17 +99,26 @@ const InteractionsBaseComponent = React.memo<Props>(function InteractionsBaseCom
     >
       <ToolGroup name={OBJECT_TAB_TYPE}>
         <ToolGroupFixedSizePane>
-          {droneId != undefined ? (
-            <DroneControlPanel
-              droneId={droneId}
-              onClickPublish={onClickPublish}
-              publishActive={publishActive}
-              canPublish={canPublish}
-              publish={publish}
-              advertise={advertise}
-              unadvertise={unadvertise}
-              dataSourceProfile={dataSourceProfile}
-            />
+          {activeDroneId != undefined ? (
+            isMapping ? (
+              <WaypointPanel
+                droneId={activeDroneId}
+                publish={publish}
+                advertise={advertise}
+                unadvertise={unadvertise}
+              />
+            ) : (
+              <DroneControlPanel
+                droneId={activeDroneId}
+                onClickPublish={onClickPublish}
+                publishActive={publishActive}
+                canPublish={canPublish}
+                publish={publish}
+                advertise={advertise}
+                unadvertise={unadvertise}
+                dataSourceProfile={dataSourceProfile}
+              />
+            )
           ) : (
             <Typography variant="body2" color="text.disabled" gutterBottom>
               Click an object in the 3D view to select it.

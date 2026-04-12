@@ -31,7 +31,9 @@ import {
   DEFAULT_FOLLOW_MODE,
   PANEL_STYLE,
 } from "@lichtblick/suite-base/panels/ThreeDeeRender/constants";
-import { TOPIC_CONFIG } from "@lichtblick/suite-base/spikive/config/topicConfig";
+import { TOPIC_CONFIG, extractDroneIdFromTopic } from "@lichtblick/suite-base/spikive/config/topicConfig";
+import { useSceneModeStore } from "@lichtblick/suite-base/spikive/stores/useSceneModeStore";
+import { useWaypointStore } from "@lichtblick/suite-base/spikive/stores/useWaypointStore";
 import ThemeProvider from "@lichtblick/suite-base/theme/ThemeProvider";
 
 import type { IRenderer, ImageModeConfig, RendererConfig, RendererSubscription } from "./IRenderer";
@@ -633,14 +635,36 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
     config.layers,
   ]);
 
-  // Notify the extension context when our subscription list changes
+  // Spikive: read scene mode and waypoint store updater for odom interception
+  const sceneMode = useSceneModeStore((s) => s.sceneMode);
+  const updateOdom = useWaypointStore((s) => s.updateOdom);
+
+  // Notify the extension context when our subscription list changes.
+  // In mapping mode, also subscribe to all odom topics for waypoint recording.
   useEffect(() => {
     if (!topicsToSubscribe) {
       return;
     }
-    log.debug(`Subscribing to [${topicsToSubscribe.map((t) => JSON.stringify(t)).join(", ")}]`);
-    context.subscribe(topicsToSubscribe);
-  }, [context, topicsToSubscribe]);
+
+    let subs = topicsToSubscribe;
+
+    if (sceneMode === "mapping-waypoint" && topics) {
+      const odomSubs = topics
+        .filter((t) => /^\/drone_\w+_visual_slam\/odom$/.test(t.name))
+        .map((t) => ({
+          topic: t.name,
+          preload: false as const,
+          sampling: { mode: "latest-per-render-tick" as const },
+        }));
+      log.info(`[Spikive] Mapping mode: found ${odomSubs.length} odom topics from ${topics.length} total`);
+      if (odomSubs.length > 0) {
+        subs = [...topicsToSubscribe, ...odomSubs];
+      }
+    }
+
+    log.debug(`Subscribing to [${subs.map((t) => JSON.stringify(t)).join(", ")}]`);
+    context.subscribe(subs);
+  }, [context, topicsToSubscribe, sceneMode, topics]);
 
   // Keep the renderer parameters up to date
   useEffect(() => {
@@ -702,10 +726,27 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
 
     for (const message of currentFrameMessages) {
       renderer.addMessageEvent(message);
+
+      // Spikive: intercept odom messages and push position into waypoint store
+      if (sceneMode === "mapping-waypoint") {
+        if (/^\/drone_\w+_visual_slam\/odom$/.test(message.topic)) {
+          const droneId = extractDroneIdFromTopic(message.topic);
+          if (droneId != undefined) {
+            const odom = message.message as {
+              pose?: { pose?: { position?: { x: number; y: number; z: number } } };
+            };
+            const p = odom?.pose?.pose?.position;
+            if (p) {
+              log.info(`[Spikive] Odom update drone=${droneId}: ${p.x.toFixed(3)}, ${p.y.toFixed(3)}, ${p.z.toFixed(3)}`);
+              updateOdom(droneId, { x: p.x, y: p.y, z: p.z });
+            }
+          }
+        }
+      }
     }
 
     renderRef.current.needsRender = true;
-  }, [currentFrameMessages, renderer]);
+  }, [currentFrameMessages, renderer, sceneMode, updateOdom]);
 
   // Update the renderer when the camera moves
   useEffect(() => {

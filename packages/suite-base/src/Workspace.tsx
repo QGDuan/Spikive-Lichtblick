@@ -37,6 +37,7 @@ import {
   useMessagePipelineGetter,
 } from "@lichtblick/suite-base/components/MessagePipeline";
 import { MultiRobotSidebar } from "@lichtblick/suite-base/components/MultiRobotSidebar";
+import { SceneSelectionDialog } from "@lichtblick/suite-base/spikive/components/SceneSelectionDialog";
 import { ThemeToggleButton } from "@lichtblick/suite-base/spikive/components/ThemeToggleButton";
 import { PanelCatalog } from "@lichtblick/suite-base/components/PanelCatalog";
 import PanelLayout from "@lichtblick/suite-base/components/PanelLayout";
@@ -513,6 +514,7 @@ function WorkspaceContent(props: WorkspaceProps): React.JSX.Element {
 
   return (
     <PanelStateContextProvider>
+      <SceneSelectionDialog />
       {dataSourceDialog.open && <DataSourceDialog />}
       <DocumentDropListener onDrop={dropHandler} allowedExtensions={allowedDropExtensions} />
       <SyncAdapters />
