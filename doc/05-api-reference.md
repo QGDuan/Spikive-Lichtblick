@@ -24,6 +24,8 @@
 │  │  ┌──────────────────┐                                            │   │
 │  │  │  topicConfig.ts   │◄──────────────────────────────────────┐   │   │
 │  │  │  (核心配置)        │                                       │   │   │
+│  │  │  +PROJECT_TOPICS  │                                       │   │   │
+│  │  │  +WAYPOINT_COLORS │                                       │   │   │
 │  │  └──────────────────┘                                        │   │   │
 │  │           ▲  ▲  ▲                                            │   │   │
 │  └───────────┼──┼──┼────────────────────────────────────────────┘   │   │
@@ -44,17 +46,25 @@
 │  │  │  ┌───────────────────┐  ┌──────────────────┐              │   │   │
 │  │  │  │ useSceneModeStore │  │ useWaypointStore │              │   │   │
 │  │  │  │ .ts               │  │ .ts              │              │   │   │
-│  │  │  └───────────────────┘  └──────────────────┘              │   │   │
-│  │  │           ▲                      ▲                        │   │   │
-│  └──┼───────────┼──────────────────────┼────────────────────────┘   │   │
-│     │           │                      │                            │   │
-│  ┌──┼───────────┼──────────────────────┼────────────────────────┐   │   │
-│  │  │           │    spikive/components/                         │   │   │
-│  │  │           │                      │                        │   │   │
-│  │  │  ┌────────┴──────────┐  ┌────────┴──────────┐            │   │   │
-│  │  │  │SceneSelection     │  │ WaypointPanel     │            │   │   │
-│  │  │  │Dialog.tsx         │  │ .tsx              │            │   │   │
-│  │  │  └───────────────────┘  └───────────────────┘            │   │   │
+│  │  │  └───────────────────┘  │ +projectList     │              │   │   │
+│  │  │           ▲              │ +setProjectList  │              │   │   │
+│  │  │           │              │ +setWaypoints... │              │   │   │
+│  │  │           │              └──────────────────┘              │   │   │
+│  │  │           │                ▲     ▲     ▲                  │   │   │
+│  └──┼───────────┼────────────────┼─────┼─────┼──────────────────┘   │   │
+│     │           │                │     │     │                      │   │
+│  ┌──┼───────────┼────────────────┼─────┼─────┼──────────────────┐   │   │
+│  │  │           │    spikive/components/│     │                  │   │   │
+│  │  │           │                │     │     │                  │   │   │
+│  │  │  ┌────────┴──────────┐  ┌─┴─────┴─────┴──────────┐      │   │   │
+│  │  │  │SceneSelection     │  │ WaypointPanel           │      │   │   │
+│  │  │  │Dialog.tsx         │  │ .tsx (627 行)            │      │   │   │
+│  │  │  └───────────────────┘  │ ┌─────────────────────┐ │      │   │   │
+│  │  │                         │ │ SaveProjectDialog    │ │      │   │   │
+│  │  │                         │ │ LoadProjectDialog    │ │      │   │   │
+│  │  │                         │ │ ManageProjectsDialog │ │      │   │   │
+│  │  │                         │ └─────────────────────┘ │      │   │   │
+│  │  │                         └─────────────────────────┘      │   │   │
 │  │  │                                                          │   │   │
 │  │  └──┐  ┌──────────────────┐  ┌──────────────────┐          │   │   │
 │  │     │  │DroneControlPanel │  │ThemeToggleButton  │          │   │   │
@@ -85,8 +95,9 @@
 │  │ +SceneSelection  │  │ .tsx           │  │ .tsx             │  │   │
 │  │ +ThemeToggle     │  │ +DroneControl  │  │ +odom 拦截       │  │   │
 │  │ +MultiRobotSidebar│  │ +WaypointPanel │  │ +GoalSet publish │  │   │
-│  └──────────────────┘  └────────────────┘  └──────────────────┘  │   │
-│                                                                   │   │
+│  └──────────────────┘  └────────────────┘  │ +颜色覆盖        │  │   │
+│                                             │ +projectList拦截 │  │   │
+│                                             └──────────────────┘  │   │
 │  ┌──────────────────┐  ┌────────────────┐  ┌──────────────────┐  │   │
 │  │ Renderer.ts       │  │ publish.ts     │  │ defaultLayout.ts │  │   │
 │  │ +pickable filter  │  │ +GoalSet msg   │  │ +topic config   │  │   │
@@ -104,7 +115,7 @@
 
 ### 2.1 topicConfig.ts
 
-**路径**: `packages/suite-base/src/spikive/config/topicConfig.ts` (99 行)
+**路径**: `packages/suite-base/src/spikive/config/topicConfig.ts` (110 行)
 
 **导出清单**:
 
@@ -118,6 +129,30 @@
 | `CONTROL_TOPIC` | `string` ("/control") | 飞行指令发布 topic |
 | `DRONE_COMMANDS` | `object` | `{ TAKEOFF: 1, LAND: 2, RETURN: 3, CONTINUE: 4, STOP: 5 }` |
 | `TOPIC_CONFIG` | `object` | 聚合配置: `{ subscribe, publish, followTf }` |
+| `PROJECT_TOPICS` | `object` | 项目管理 topic: `{ saveWaypoints, loadWaypoints, deleteProject, reorderWaypoints, projectList }` |
+| `WAYPOINT_COLORS` | `object` | 航点标记颜色: `{ sphere: #EF833A, text: white, line: #9C27B0 }` |
+
+**PROJECT_TOPICS 详细定义**:
+
+```typescript
+export const PROJECT_TOPICS = {
+  saveWaypoints:    "/save_waypoints",            // 保存航点项目
+  loadWaypoints:    "/load_waypoints",            // 加载航点项目
+  deleteProject:    "/delete_waypoint_project",   // 删除项目 (逗号分隔多个)
+  reorderWaypoints: "/reorder_waypoints",         // 重排航点 (JSON order)
+  projectList:      "/waypoint_project_list",     // 后端推送项目列表
+} as const;
+```
+
+**WAYPOINT_COLORS 详细定义**:
+
+```typescript
+export const WAYPOINT_COLORS = {
+  sphere: { r: 0.937, g: 0.514, b: 0.227, a: 1.0 },  // #EF833A Spikive 橙
+  text:   { r: 1.0,   g: 1.0,   b: 1.0,   a: 1.0 },  // 白色
+  line:   { r: 0.612, g: 0.153, b: 0.690, a: 1.0 },   // #9C27B0 紫色
+} as const;
+```
 
 **调用关系**:
 
@@ -129,6 +164,8 @@
 | `CONTROL_TOPIC` | `DroneControlPanel.tsx` |
 | `DRONE_COMMANDS` | `DroneControlPanel.tsx` |
 | `TOPIC_CONFIG` | `ThreeDeeRender.tsx`, `defaultLayout.ts` |
+| `PROJECT_TOPICS` | `WaypointPanel.tsx`, `ThreeDeeRender.tsx` |
+| `WAYPOINT_COLORS` | `ThreeDeeRender.tsx` |
 
 ---
 
@@ -189,7 +226,7 @@
 
 ### 2.4 useWaypointStore.ts
 
-**路径**: `packages/suite-base/src/spikive/stores/useWaypointStore.ts` (169 行)
+**路径**: `packages/suite-base/src/spikive/stores/useWaypointStore.ts` (176 行)
 
 **导出**:
 
@@ -207,6 +244,7 @@
 {
   tables: Record<string, DroneWaypointState>;  // droneId → 航点状态
   latestOdom: Record<string, OdomPosition>;    // droneId → 最新 odom 位置
+  projectList: string[];                       // 可用项目名列表 (由后端推送)
 }
 ```
 
@@ -221,6 +259,8 @@
 | `updateZSettings` | `(droneId: string, settings: Partial<ZSettings>) → void` | 更新 Z 轴模式/值 |
 | `clearWaypoints` | `(droneId: string) → void` | 清空该无人机所有航点 |
 | `updateOdom` | `(droneId: string, pos: OdomPosition) → void` | 更新最新 odom 位置 (高频) |
+| `setWaypointsFromMarkers` | `(droneId: string, waypoints: Waypoint[]) → void` | 从 marker 解析批量同步航点列表 |
+| `setProjectList` | `(list: string[]) → void` | 替换整个项目列表 (由 ThreeDeeRender 拦截消息后调用) |
 
 **内部函数**:
 
@@ -228,6 +268,15 @@
 | --- | --- | --- |
 | `defaultDroneState` | `() → DroneWaypointState` | 返回默认航点状态 (zMode="override", overrideZ=1.5) |
 | `applyZ` | `(actualZ: number, state: DroneWaypointState) → number` | 根据 zMode 计算最终 Z 值 |
+
+**写入者与读取者**:
+
+| 写入者 | Action | 读取者 |
+| --- | --- | --- |
+| ThreeDeeRender (odom 拦截) | `updateOdom()` | WaypointPanel → `latestOdom[droneId]` |
+| ThreeDeeRender (marker 拦截) | `setWaypointsFromMarkers()` | WaypointPanel → `tables[droneId].waypoints` |
+| ThreeDeeRender (project list 拦截) | `setProjectList()` | SaveProjectDialog, LoadProjectDialog, ManageProjectsDialog |
+| WaypointPanel (用户操作) | `addWaypoint()`, `removeWaypoint()`, `clearWaypoints()` | WaypointPanel → 航点列表 |
 
 ---
 
@@ -274,7 +323,7 @@
 
 ### 2.7 WaypointPanel.tsx
 
-**路径**: `packages/suite-base/src/spikive/components/WaypointPanel.tsx` (330 行)
+**路径**: `packages/suite-base/src/spikive/components/WaypointPanel.tsx` (627 行)
 
 **Props**:
 
@@ -289,16 +338,117 @@
 
 **关键行为**:
 
-- `useEffect(mount)`: `advertise("/waypoint_markers", "visualization_msgs/MarkerArray", { datatypes: WaypointMarkerDatatypes })`
+- `useEffect(mount)`: advertise 5 个 topic:
+  - `/waypoint_markers` ("visualization_msgs/MarkerArray")
+  - `/save_waypoints` ("std_msgs/String")
+  - `/load_waypoints` ("std_msgs/String")
+  - `/delete_waypoint_project` ("std_msgs/String")
+  - `/reorder_waypoints` ("std_msgs/String")
 - `useEffect(waypoints change)`: `makeWaypointMarkerArray(waypoints, "world")` → `publish("/waypoint_markers", markerArray)`
 - `handleRecord()`: 读取 `latestOdom[droneId]` → `addWaypoint(droneId, x, y, z)`
-- `useEffect(unmount)`: `unadvertise("/waypoint_markers")`
+- `handleSave(name)`: `publish("/save_waypoints", { data: name })`
+- `handleLoad(name)`: `publish("/load_waypoints", { data: name })`
+- `handleDeleteProject(names)`: `publish("/delete_waypoint_project", { data: names })` (逗号分隔)
+- `handleDrop(src, tgt)`: 重排 waypoints + `publish("/reorder_waypoints", { data: JSON.stringify({order}) })`
+- `useEffect(unmount)`: unadvertise 全部 5 个 topic
+
+**内部子组件**:
+
+| 组件 | 说明 |
+| --- | --- |
+| `DraggableWaypointRow` | HTML5 D&D 可拖拽行，封装拖拽手柄 + 视觉反馈 (opacity, border) |
+
+**集成的 Dialog 组件**:
+
+| Dialog | 触发 | 回调 |
+| --- | --- | --- |
+| `SaveProjectDialog` | toolbar Save 按钮 | `onSave(name)` → handleSave |
+| `LoadProjectDialog` | toolbar Load 按钮 | `onLoad(name)` → handleLoad |
+| `ManageProjectsDialog` | toolbar Manage 按钮 | `onDelete(names)` → handleDeleteProject |
 
 **调用位置**: `Interactions.tsx` → `sceneMode === "mapping-waypoint"` 时渲染
 
 ---
 
-### 2.8 ThemeToggleButton.tsx
+### 2.8 SaveProjectDialog.tsx
+
+**路径**: `packages/suite-base/src/spikive/components/SaveProjectDialog.tsx` (~100 行)
+
+**Props**:
+
+```typescript
+{
+  open: boolean;
+  onClose: () => void;
+  onSave: (name: string) => void;
+}
+```
+
+**关键行为**:
+
+- MUI Autocomplete 输入框，已保存项目名作为建议列表
+- 输入验证: `/^[a-zA-Z0-9]*$/` (仅字母数字)，非法字符实时错误提示
+- 空输入默认使用 `"waypoint"`
+- Enter 键提交 (无验证错误时)
+- 关闭时重置输入状态
+
+**数据依赖**: `useWaypointStore.projectList` (Autocomplete 建议列表)
+
+---
+
+### 2.9 LoadProjectDialog.tsx
+
+**路径**: `packages/suite-base/src/spikive/components/LoadProjectDialog.tsx` (~70 行)
+
+**Props**:
+
+```typescript
+{
+  open: boolean;
+  onClose: () => void;
+  onLoad: (name: string) => void;
+}
+```
+
+**关键行为**:
+
+- MUI Select 下拉列表展示已保存项目
+- 空列表时显示 "No saved projects found"
+- 未选择时 Load 按钮禁用
+- 关闭时重置选择状态
+
+**数据依赖**: `useWaypointStore.projectList`
+
+---
+
+### 2.10 ManageProjectsDialog.tsx
+
+**路径**: `packages/suite-base/src/spikive/components/ManageProjectsDialog.tsx` (~110 行)
+
+**Props**:
+
+```typescript
+{
+  open: boolean;
+  onClose: () => void;
+  onDelete: (names: string) => void;  // 逗号分隔的项目名
+}
+```
+
+**关键行为**:
+
+- MUI Checkbox List 多选界面
+- 每项右侧有快捷删除按钮 (🗑)，支持单项直接删除
+- 批量选择后显示 "Delete Selected (N)" 按钮
+- 空列表时显示 "No saved projects"
+- 关闭时清除选择状态
+- `onDelete` 回调传递逗号分隔的项目名字符串
+
+**数据依赖**: `useWaypointStore.projectList`
+
+---
+
+### 2.11 ThemeToggleButton.tsx
 
 **路径**: `packages/suite-base/src/spikive/components/ThemeToggleButton.tsx` (30 行)
 
@@ -424,12 +574,14 @@ interface RobotEntry {
 
 | 新增/修改 | 位置 | 说明 |
 | --- | --- | --- |
-| import | L34 | `TOPIC_CONFIG, extractDroneIdFromTopic` from topicConfig |
+| import | L34 | `TOPIC_CONFIG, extractDroneIdFromTopic, PROJECT_TOPICS, WAYPOINT_COLORS` from topicConfig |
 | import | L35-36 | `useSceneModeStore`, `useWaypointStore` |
 | import | L50-57 | `GoalSetDatatypes, makeGoalSetMessage` from publish |
-| 读取 Store | L638-640 | `sceneMode`, `updateOdom` |
-| 动态订阅 | L644-667 | mapping 模式下额外订阅 `/drone_\w+_visual_slam/odom` |
-| 消息拦截 | L730-745 | odom 消息正则匹配 → extractDroneIdFromTopic → updateOdom() |
+| 读取 Store | L638-640 | `sceneMode`, `updateOdom`, `setProjectList`, `setWaypointsFromMarkers` |
+| 动态订阅 | L644-667 | mapping 模式下额外订阅 `/drone_\w+_visual_slam/odom` + `/waypoint_project_list` |
+| 消息拦截 (odom) | L730-745 | odom 消息正则匹配 → extractDroneIdFromTopic → updateOdom() |
+| 消息拦截 (markers) | L772-819 | `/waypoint_markers` 颜色覆盖 (SPHERE→橙, TEXT→白, LINE→紫) + sphere→store 解析 |
+| 消息拦截 (project list) | L821-831 | `/waypoint_project_list` JSON 解析 → setProjectList() |
 | Ref 定义 | L841 | `publishDroneIdRef = useRef<string \| undefined>(undefined)` |
 | advertise | L866-870 | GoalSet topic: `/goal_with_id` |
 | unadvertise | L876 | cleanup GoalSet topic |
@@ -547,13 +699,14 @@ bool returned   # 是否已返航
 **用途**: 航点可视化标记
 **发布 topic**: `/waypoint_markers`
 **发布者**: WaypointPanel
+**颜色覆盖**: ThreeDeeRender 拦截后重写颜色 (WAYPOINT_COLORS)
 
 ```text
 visualization_msgs/Marker[] markers
   # DELETEALL (type=3, action=3): 清除旧标记
-  # SPHERE    (type=2): 航点球体, 橙色, 0.3m
-  # TEXT_VIEW_FACING (type=9): 航点编号, 黄色, 0.3m
-  # LINE_STRIP (type=4): 航点连线, 绿色, 0.05m 线宽
+  # SPHERE    (type=2): 航点球体, 前端覆盖为 Spikive 橙 #EF833A, 0.3m
+  # TEXT_VIEW_FACING (type=9): 航点编号, 前端覆盖为白色, 0.3m
+  # LINE_STRIP (type=4): 航点连线, 前端覆盖为紫色 #9C27B0, 0.05m 线宽
 ```
 
 ### 5.5 nav_msgs/Odometry (订阅/拦截)
@@ -575,3 +728,23 @@ geometry_msgs/PoseWithCovariance pose
   float64[36] covariance
 geometry_msgs/TwistWithCovariance twist
 ```
+
+### 5.6 项目管理消息 (std_msgs/String, JSON payload)
+
+**用途**: 航点项目的保存、加载、删除、排序和列表同步
+**消息类型**: 统一使用 `std_msgs/String`，`data` 字段承载不同格式的 payload
+
+```text
+std_msgs/String
+  string data    # JSON 或纯文本 payload
+```
+
+**各 Topic 的 payload 格式**:
+
+| Topic | 方向 | data 内容 | 示例 |
+| --- | --- | --- | --- |
+| `/save_waypoints` | 前端→后端 | 项目名 (纯文本) | `"route_A"` |
+| `/load_waypoints` | 前端→后端 | 项目名 (纯文本) | `"route_A"` |
+| `/delete_waypoint_project` | 前端→后端 | 逗号分隔的项目名 | `"route_A,route_B"` |
+| `/reorder_waypoints` | 前端→后端 | JSON: 新航点顺序 | `'{"order": [2, 3, 1, 4]}'` |
+| `/waypoint_project_list` | 后端→前端 | JSON: 可用项目列表 | `'{"projects": ["route_A", "test_1"]}'` |
