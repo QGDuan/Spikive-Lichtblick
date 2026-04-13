@@ -1,156 +1,171 @@
-<h1 align="center">Lichtblick</h1>
+<h1 align="center">Spikive Ground Station</h1>
 
-<div align="center">
-  <a href="https://github.com/lichtblick-suite/lichtblick/stargazers"><img src="https://img.shields.io/github/stars/lichtblick-suite/lichtblick" alt="Stars Badge"/></a>
-  <a href="https://github.com/lichtblick-suite/lichtblick/network/members"><img src="https://img.shields.io/github/forks/lichtblick-suite/lichtblick" alt="Forks Badge"/></a>
-  <a href="https://github.com/lichtblick-suite/lichtblick/pulls"><img src="https://img.shields.io/github/issues-pr/lichtblick-suite/lichtblick" alt="Pull Requests Badge"/></a>
-  <a href="https://github.com/lichtblick-suite/lichtblick/issues"><img src="https://img.shields.io/github/issues/lichtblick-suite/lichtblick" alt="Issues Badge"/></a>
-  <a href="https://github.com/lichtblick-suite/lichtblick/issues"><img src="https://img.shields.io/github/package-json/v/lichtblick-suite/lichtblick" alt="Versions Badge"/></a>
-  <a href="https://github.com/lichtblick-suite/lichtblick/graphs/contributors"><img alt="GitHub contributors" src="https://img.shields.io/github/contributors/lichtblick-suite/lichtblick?color=2b9348"></a>
-  <a href="https://opensource.org/licenses/MPL-2.0"><img src="https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg" alt="License: MPL 2.0"></a>
-
-  <br />
-<p  align="center">
-Lichtblick is an integrated visualization and diagnosis tool for robotics, available in your browser or as a desktop app on Linux, Windows, and macOS.
+<p align="center">
+  基于 Lichtblick 的多无人机地面站可视化与控制系统
 </p>
-  <p align="center">
-    <img alt="Lichtblick screenshot" src="resources/screenshot.png">
-  </p>
-</div>
 
-## :rocket: Try Lichtblick
+<p align="center">
+  <img alt="License: MPL 2.0" src="https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg">
+  <img alt="Node" src="https://img.shields.io/badge/Node-%3E%3D20-green">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-blue">
+  <img alt="React" src="https://img.shields.io/badge/React-18-61dafb">
+</p>
 
-**[Try Lichtblick now in your browser!](https://lichtblick-suite.github.io/lichtblick/)**
+<p align="center">
+  <img alt="Spikive Ground Station" src="resources/screenshot.png" width="800">
+</p>
 
-No installation required - experience the full power of Lichtblick directly in your web browser!
+## 项目简介
 
-## :book: Documentation
+Spikive Ground Station 是一套面向多无人机 SLAM 建图、路径规划与自主飞行的 Web 地面站。基于 [Lichtblick Suite](https://github.com/lichtblick-suite/lichtblick) v1.24.3 进行定制开发，通过 Foxglove Bridge WebSocket 与局域网内多台运行 ROS1 的无人机实时通信。
 
-Looking for guidance on using Lichtblick? Check out our [official documentation here!](https://lichtblick-suite.github.io/docs/)
+核心设计原则：**极简减法 UI** — 隐藏 Lichtblick 原生的复杂界面，只保留一个全屏 3D Panel 和自定义的多机控制侧边栏。
 
-We are actively updating our documentation with new features, stay tunned! :rocket:
+## 核心功能
 
-**Dependencies:**
+### 多机管理
+- 通过侧边栏添加/移除无人机（WebSocket 连接 + 健康监测）
+- 点击切换当前激活的无人机，所有 3D 交互自动路由到对应机器
+- 动态 Topic 路由：`/drone_{id}_*` 命名空间隔离，切换时实时重映射 5 类 Topic + TF 坐标系
 
-- [Node.js](https://nodejs.org/en/) v16.10+
+### 两种操作场景
 
-<hr/>
+**自主飞行模式**
+- 在 3D 场景中点击无人机模型，弹出飞控面板（起飞/降落/返航/停止/继续）
+- 通过 2D Nav Goal 工具向 EGO-Planner 发送目标点，实时规划并执行
 
-## :rocket: Getting started
+**建图打点模式**
+- 拦截无人机 odom 数据，实时显示当前位置
+- 一键 Record 记录航点，支持 Z 轴覆写调整
+- 后端维护航点列表，3D 场景中渲染航点球体、序号标签和连接线
+- 支持单点删除和一键清空
 
-### :whale: From Docker
+### 3D 可视化
+- SLAM 点云（单色灰调，60s 衰减）
+- 无人机模型（可点击选中）
+- 实时轨迹路径
+- EGO-Planner 最优轨迹与目标点
+- 航点标记（橙色球体 + 白色序号 + 紫色连线，不可点击穿透）
 
-To run lichtblick via docker you can run:
+## 技术栈
 
-```sh
-docker run --rm -p 8080:8080 ghcr.io/lichtblick-suite/lichtblick:latest
+| 层 | 技术 |
+| --- | --- |
+| 前端框架 | React 18 + TypeScript |
+| UI 组件 | Material-UI (MUI) |
+| 3D 渲染 | Three.js (Lichtblick 内置) |
+| 状态管理 | Zustand (3 个独立 Store) |
+| 通信协议 | Foxglove Bridge WebSocket (`ws://IP:8765`) |
+| 机器人框架 | ROS1 (Noetic) |
+| 构建工具 | Yarn Workspaces + Webpack |
+| 桌面端 | Electron |
+
+## 项目结构
+
+```
+packages/suite-base/src/
+├── spikive/                          # Spikive 自定义代码（与 Lichtblick 核心解耦）
+│   ├── components/
+│   │   ├── SceneSelectionDialog.tsx   # 场景模式选择弹窗
+│   │   ├── DroneControlPanel.tsx      # 飞控面板（起飞/降落/返航/停止）
+│   │   ├── WaypointPanel.tsx          # 航点记录面板（打点/删除/清空）
+│   │   └── ThemeToggleButton.tsx      # 主题切换
+│   ├── config/
+│   │   └── topicConfig.ts            # Topic 命名规范 + 颜色常量
+│   ├── hooks/
+│   │   └── useActiveDroneRouting.ts  # 动态 Topic 重映射
+│   ├── stores/
+│   │   ├── useSceneModeStore.ts      # 场景模式状态
+│   │   └── useWaypointStore.ts       # 航点数据 + Odom 追踪
+│   └── styles/
+│       └── spikiveGlobalOverrides.css # 隐藏原生 UI 元素
+├── components/
+│   └── MultiRobotSidebar/            # 多机管理侧边栏
+└── panels/ThreeDeeRender/            # 3D Panel（带 Spikive 拦截注入）
 ```
 
-And open in your browser: http://localhost:8080/
+## 快速开始
 
-### 📑 From source code
+### 环境要求
 
-Clone the repository:
+- Node.js >= 20
+- Yarn (通过 corepack)
+- 局域网内运行 Foxglove Bridge 的 ROS1 无人机
 
-```sh
-$ git clone https://github.com/lichtblick-suite/lichtblick.git
-```
-
-Enable corepack:
-
-```sh
-$ corepack enable
-```
-
-Install packages from `package.json`:
-
-```sh
-$ yarn install
-```
-
-- If you still get errors about corepack after running `corepack enable`, try uninstalling and reinstalling Node.js. Ensure that Yarn is not separately installed from another source, but is installed _via_ corepack.
-
-Launch the development environment:
-
-```sh
-# To launch the desktop app (run scripts in different terminals):
-$ yarn desktop:serve        # start webpack dev server
-$ yarn desktop:start        # launch electron (make sure the desktop:serve finished to build)
-
-# To launch the web app:
-$ yarn run web:serve        # it will be avaiable in http://localhost:8080
-```
-
-:warning: Ubuntu users: the application may present some issues using GPU. In order to bypass the GPU and process it using directly the CPU (software), please run lichtblick using the variable `LIBGL_ALWAYS_SOFTWARE` set to `1`:
-
-```sh
-$ LIBGL_ALWAYS_SOFTWARE=1 yarn desktop:start
-```
-
-## :hammer_and_wrench: Building Lichtblick
-
-Build the application for production using these commands:
-
-```sh
-# To build the desktop apps:
-$ yarn run desktop:build:prod   # compile necessary files
-
-- yarn run package:win         # Package for windows
-- yarn run package:darwin      # Package for macOS
-- yarn run package:linux       # Package for linux
-
-# To build the web app:
-$ yarn run web:build:prod
-
-# To build and run the web app using docker:
-$ docker build . -t lichtblick
-$ docker run -p 8080:8080 lichtblick
-
-# It is possible to clean up build files using the following command:
-$ yarn run clean
-```
-
-- The desktop builds are located in the `dist` directory, and the web builds are found in the `web/.webpack` directory.
-
-## :warning: Note on Linux dependencies (.tar.gz only)
-
-When installing the **`.tar.gz` package**, unlike the `.deb`, **system dependencies are not installed automatically**.
-In many cases, if you already have **Google Chrome** or another Chromium-based application installed, Lichtblick will run fine since these applications bring most of the required libraries.
-
-However, if you see errors about missing libraries when launching Lichtblick, you will need to install them manually.
-The most common missing dependencies are:
-
-- `libgtk-3-0`
-- `libatk1.0-0`
-- `libatk-bridge2.0-0`
-- `libatspi2.0-0`
-- `libnss3`
-- `libnspr4`
-- `libasound2`
-- `libcups2`
-- `libnotify4`
-- `libxtst6`
-- `xdg-utils`
-- `libdrm2`
-- `libgbm1`
-- `libxcb-dri3-0`
-
-Example (Debian/Ubuntu):
+### 安装与启动
 
 ```bash
-sudo apt-get update && sudo apt-get install libgtk-3-0 libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 libnss3 libnspr4 libasound2 libcups2 libnotify4 libxtst6 xdg-utils libdrm2 libgbm1 libxcb-dri3-0
+# 克隆仓库
+git clone https://github.com/QGDuan/Spikive-Lichtblick.git
+cd Spikive-Lichtblick
+
+# 启用 corepack 并安装依赖
+corepack enable
+yarn install
+
+# 启动 Web 开发服务器
+yarn web:serve
+# 浏览器访问 http://localhost:8080
+
+# 或启动桌面端
+yarn desktop:serve     # 终端 1：启动 webpack dev server
+yarn desktop:start     # 终端 2：启动 Electron
 ```
 
-👉 **Recommendation**: if using the `.tar.gz`, always check the error messages in the terminal. They will indicate which library is missing so you can install it manually.
+### 生产构建
 
-## :pencil: License (Open Source)
+```bash
+# Web 版本
+yarn web:build:prod
 
-Lichtblick follows an open core licensing model. Most functionality is available in this repository, and can be reproduced or modified per the terms of the [Mozilla Public License v2.0](/LICENSE).
+# 桌面版本
+yarn desktop:build:prod
+yarn package:linux     # 或 package:win / package:darwin
 
-## :handshake: Contributing
+# Docker
+docker build . -t spikive-ground-station
+docker run -p 8080:8080 spikive-ground-station
+```
 
-Contributions are welcome! Lichtblick is primarily built in TypeScript and ReactJS. All potential contributors must agree to the Contributor License Agreement outlined in [CONTRIBUTING.md](CONTRIBUTING.md).
+## 部署架构
 
-## :star: Credits
+```
+┌─────────────────────────────────────────────────┐
+│                 地面站 PC (本项目)                 │
+│  Spikive Ground Station (Web/Electron)          │
+│  ws://drone_ip:8765 ←→ Foxglove Bridge          │
+└──────────────┬──────────────┬───────────────────┘
+               │   局域网      │
+        ┌──────┴──────┐ ┌─────┴───────┐
+        │   Drone 1   │ │   Drone 2   │  ...
+        │ Visual SLAM │ │ Visual SLAM │
+        │ EGO-Planner │ │ EGO-Planner │
+        │ FoxgloveBr. │ │ FoxgloveBr. │
+        └─────────────┘ └─────────────┘
+```
 
-Lichtblick originally began as a fork of [Foxglove Studio](https://github.com/foxglove/studio), an open-source project developed by [Foxglove](https://foxglove.dev/).
+## 文档
+
+详细的架构文档位于 [doc/](doc/) 目录：
+
+| 文档 | 内容 |
+| --- | --- |
+| [架构总览](doc/01-architecture-overview.md) | 系统架构、组件树、状态流、Topic 路由 |
+| [增量演进](doc/02-incremental-evolution.md) | Git 提交历史与设计决策 |
+| [自主飞行场景](doc/03-scenario-autonomous-flight.md) | GoalSet 发布、DroneControlPanel 生命周期 |
+| [建图打点场景](doc/04-scenario-mapping-waypoint.md) | Odom 拦截、MarkerArray 可视化、Z 轴逻辑 |
+| [API 参考](doc/05-api-reference.md) | Store API、ROS 消息格式、修改点清单 |
+| [Drone ID 路由](doc/drone-id-routing.md) | 路由架构深度解析 |
+
+## 架构原则
+
+- **保持 Lichtblick 核心纯洁** — 所有新代码隔离在 `spikive/` 命名空间，上游可合并
+- **标注修改点** — 所有对 Lichtblick 的改动以 `// Spikive:` 注释标记
+- **场景驱动** — 两种模式共享基础设施（路由、侧边栏），仅交互处理器不同
+- **单一数据源** — Zustand Store 驱动，无 prop drilling
+
+## 许可证
+
+本项目基于 [Mozilla Public License v2.0](LICENSE) 开源。
+
+Lichtblick 最初是 [Foxglove Studio](https://github.com/foxglove/studio) 的 fork，由 [Lichtblick Suite](https://github.com/lichtblick-suite) 维护。
