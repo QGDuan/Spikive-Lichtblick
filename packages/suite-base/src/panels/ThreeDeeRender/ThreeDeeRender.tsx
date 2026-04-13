@@ -31,7 +31,7 @@ import {
   DEFAULT_FOLLOW_MODE,
   PANEL_STYLE,
 } from "@lichtblick/suite-base/panels/ThreeDeeRender/constants";
-import { TOPIC_CONFIG, extractDroneIdFromTopic } from "@lichtblick/suite-base/spikive/config/topicConfig";
+import { TOPIC_CONFIG, DEFAULT_DRONE_ID, WAYPOINT_COLORS, extractDroneIdFromTopic } from "@lichtblick/suite-base/spikive/config/topicConfig";
 import { useSceneModeStore } from "@lichtblick/suite-base/spikive/stores/useSceneModeStore";
 import { useWaypointStore } from "@lichtblick/suite-base/spikive/stores/useWaypointStore";
 import ThemeProvider from "@lichtblick/suite-base/theme/ThemeProvider";
@@ -638,9 +638,10 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
   // Spikive: read scene mode and waypoint store updater for odom interception
   const sceneMode = useSceneModeStore((s) => s.sceneMode);
   const updateOdom = useWaypointStore((s) => s.updateOdom);
+  const setWaypointsFromMarkers = useWaypointStore((s) => s.setWaypointsFromMarkers);
 
   // Notify the extension context when our subscription list changes.
-  // In mapping mode, also subscribe to all odom topics for waypoint recording.
+  // In mapping mode, also subscribe to odom topics and /waypoint_markers.
   useEffect(() => {
     if (!topicsToSubscribe) {
       return;
@@ -649,6 +650,9 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
     let subs = topicsToSubscribe;
 
     if (sceneMode === "mapping-waypoint" && topics) {
+      const extraSubs: typeof subs = [];
+
+      // Subscribe to all odom topics for position display
       const odomSubs = topics
         .filter((t) => /^\/drone_\w+_visual_slam\/odom$/.test(t.name))
         .map((t) => ({
@@ -656,9 +660,21 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
           preload: false as const,
           sampling: { mode: "latest-per-render-tick" as const },
         }));
-      log.info(`[Spikive] Mapping mode: found ${odomSubs.length} odom topics from ${topics.length} total`);
-      if (odomSubs.length > 0) {
-        subs = [...topicsToSubscribe, ...odomSubs];
+      extraSubs.push(...odomSubs);
+
+      // Subscribe to /waypoint_markers for backend-driven waypoint list
+      const waypointMarkerTopic = topics.find((t) => t.name === "/waypoint_markers");
+      if (waypointMarkerTopic) {
+        extraSubs.push({
+          topic: "/waypoint_markers",
+          preload: false as const,
+          sampling: { mode: "latest-per-render-tick" as const },
+        });
+      }
+
+      log.info(`[Spikive] Mapping mode: ${odomSubs.length} odom + ${waypointMarkerTopic ? 1 : 0} waypoint_markers`);
+      if (extraSubs.length > 0) {
+        subs = [...topicsToSubscribe, ...extraSubs];
       }
     }
 
@@ -725,10 +741,9 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
     }
 
     for (const message of currentFrameMessages) {
-      renderer.addMessageEvent(message);
-
-      // Spikive: intercept odom messages and push position into waypoint store
+      // Spikive: in mapping mode, intercept and process special topics
       if (sceneMode === "mapping-waypoint") {
+        // Intercept odom messages and push position into waypoint store
         if (/^\/drone_\w+_visual_slam\/odom$/.test(message.topic)) {
           const droneId = extractDroneIdFromTopic(message.topic);
           if (droneId != undefined) {
@@ -742,11 +757,62 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
             }
           }
         }
+
+        // Intercept /waypoint_markers: rewrite colors before rendering, then parse for store
+        if (message.topic === "/waypoint_markers") {
+          const markerArray = message.message as {
+            markers?: Array<{
+              id?: number;
+              type?: number;
+              ns?: string;
+              color?: { r: number; g: number; b: number; a: number };
+              pose?: { position?: { x: number; y: number; z: number } };
+            }>;
+          };
+          if (markerArray.markers) {
+            // Rewrite marker colors by type (frontend-defined)
+            const recolored = markerArray.markers.map((m) => {
+              switch (m.type) {
+                case 2: // SPHERE
+                  return { ...m, color: WAYPOINT_COLORS.sphere };
+                case 9: // TEXT_VIEW_FACING
+                  return { ...m, color: WAYPOINT_COLORS.text };
+                case 4: // LINE_STRIP
+                  return { ...m, color: WAYPOINT_COLORS.line };
+                default:
+                  return m;
+              }
+            });
+            const recoloredMessage = {
+              ...message,
+              message: { ...markerArray, markers: recolored },
+            };
+            renderer.addMessageEvent(recoloredMessage);
+
+            // Parse sphere markers for the waypoint store list
+            const spheres = markerArray.markers
+              .filter((m) => m.type === 2 && m.ns === "waypoints" && (m.id ?? 0) < 10000)
+              .sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+            const waypoints = spheres.map((m, i) => ({
+              idx: i + 1,
+              x: Math.round((m.pose?.position?.x ?? 0) * 1000) / 1000,
+              y: Math.round((m.pose?.position?.y ?? 0) * 1000) / 1000,
+              z: Math.round((m.pose?.position?.z ?? 0) * 1000) / 1000,
+            }));
+            log.info(`[Spikive] /waypoint_markers received: ${markerArray.markers.length} markers, ${spheres.length} spheres → store updated`);
+            setWaypointsFromMarkers(DEFAULT_DRONE_ID, waypoints);
+          } else {
+            renderer.addMessageEvent(message);
+          }
+          continue;
+        }
       }
+
+      renderer.addMessageEvent(message);
     }
 
     renderRef.current.needsRender = true;
-  }, [currentFrameMessages, renderer, sceneMode, updateOdom]);
+  }, [currentFrameMessages, renderer, sceneMode, updateOdom, setWaypointsFromMarkers]);
 
   // Update the renderer when the camera moves
   useEffect(() => {

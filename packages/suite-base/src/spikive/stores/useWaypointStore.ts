@@ -16,14 +16,13 @@ export type OdomPosition = {
   z: number;
 };
 
-/** Z-axis adjustment mode: none = raw z, override = fixed value, offset = add delta */
-export type ZMode = "none" | "override" | "offset";
+/** Z-axis adjustment mode: none = raw z, override = fixed value */
+export type ZMode = "none" | "override";
 
 export type DroneWaypointState = {
   waypoints: Waypoint[];
   zMode: ZMode;
   overrideZValue: number;
-  zOffsetValue: number;
 };
 
 function defaultDroneState(): DroneWaypointState {
@@ -31,19 +30,16 @@ function defaultDroneState(): DroneWaypointState {
     waypoints: [],
     zMode: "none",
     overrideZValue: 1.5,
-    zOffsetValue: 0.0,
   };
 }
 
 /**
- * Apply Z adjustments following waypoint_recorder.py logic.
+ * Apply Z adjustments.
  */
-function applyZ(actualZ: number, state: DroneWaypointState): number {
+export function applyZ(actualZ: number, state: DroneWaypointState): number {
   switch (state.zMode) {
     case "override":
       return state.overrideZValue;
-    case "offset":
-      return actualZ + state.zOffsetValue;
     default:
       return actualZ;
   }
@@ -54,14 +50,12 @@ type WaypointStore = {
   latestOdom: Record<string, OdomPosition>;
 
   getOrCreate: (droneId: string) => DroneWaypointState;
-  addWaypoint: (droneId: string, x: number, y: number, z: number) => void;
-  removeWaypoint: (droneId: string, idx: number) => void;
-  deleteLast: (droneId: string) => void;
+  /** Replace the waypoint list for a drone (driven by backend /waypoint_markers). */
+  setWaypointsFromMarkers: (droneId: string, waypoints: Waypoint[]) => void;
   updateZSettings: (
     droneId: string,
-    settings: Partial<Pick<DroneWaypointState, "zMode" | "overrideZValue" | "zOffsetValue">>,
+    settings: Partial<Pick<DroneWaypointState, "zMode" | "overrideZValue">>,
   ) => void;
-  clearWaypoints: (droneId: string) => void;
   updateOdom: (droneId: string, pos: OdomPosition) => void;
 };
 
@@ -79,54 +73,13 @@ export const useWaypointStore = create<WaypointStore>((set, get) => ({
     return fresh;
   },
 
-  addWaypoint: (droneId: string, x: number, y: number, z: number) => {
+  setWaypointsFromMarkers: (droneId: string, waypoints: Waypoint[]) => {
     set((s) => {
       const state = s.tables[droneId] ?? defaultDroneState();
-      const adjustedZ = applyZ(z, state);
-      const idx = state.waypoints.length + 1;
-      const wp: Waypoint = {
-        idx,
-        x: Math.round(x * 1000) / 1000,
-        y: Math.round(y * 1000) / 1000,
-        z: Math.round(adjustedZ * 1000) / 1000,
-      };
       return {
         tables: {
           ...s.tables,
-          [droneId]: { ...state, waypoints: [...state.waypoints, wp] },
-        },
-      };
-    });
-  },
-
-  removeWaypoint: (droneId: string, idx: number) => {
-    set((s) => {
-      const state = s.tables[droneId];
-      if (!state) {
-        return s;
-      }
-      const filtered = state.waypoints
-        .filter((wp) => wp.idx !== idx)
-        .map((wp, i) => ({ ...wp, idx: i + 1 }));
-      return {
-        tables: {
-          ...s.tables,
-          [droneId]: { ...state, waypoints: filtered },
-        },
-      };
-    });
-  },
-
-  deleteLast: (droneId: string) => {
-    set((s) => {
-      const state = s.tables[droneId];
-      if (!state || state.waypoints.length === 0) {
-        return s;
-      }
-      return {
-        tables: {
-          ...s.tables,
-          [droneId]: { ...state, waypoints: state.waypoints.slice(0, -1) },
+          [droneId]: { ...state, waypoints },
         },
       };
     });
@@ -134,7 +87,7 @@ export const useWaypointStore = create<WaypointStore>((set, get) => ({
 
   updateZSettings: (
     droneId: string,
-    settings: Partial<Pick<DroneWaypointState, "zMode" | "overrideZValue" | "zOffsetValue">>,
+    settings: Partial<Pick<DroneWaypointState, "zMode" | "overrideZValue">>,
   ) => {
     set((s) => {
       const state = s.tables[droneId] ?? defaultDroneState();
@@ -142,21 +95,6 @@ export const useWaypointStore = create<WaypointStore>((set, get) => ({
         tables: {
           ...s.tables,
           [droneId]: { ...state, ...settings },
-        },
-      };
-    });
-  },
-
-  clearWaypoints: (droneId: string) => {
-    set((s) => {
-      const state = s.tables[droneId];
-      if (!state) {
-        return s;
-      }
-      return {
-        tables: {
-          ...s.tables,
-          [droneId]: { ...state, waypoints: [] },
         },
       };
     });

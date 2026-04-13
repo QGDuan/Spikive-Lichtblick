@@ -12,8 +12,6 @@ import { makeStyles } from "tss-react/mui";
 
 import Stack from "@lichtblick/suite-base/components/Stack";
 
-const PANE_HEIGHT = 240;
-
 const useStyles = makeStyles()((theme) => ({
   root: {
     pointerEvents: "auto",
@@ -56,9 +54,20 @@ export function ToolGroup<T>({
   return children;
 }
 
-export function ToolGroupFixedSizePane({ children }: { children: ReactNode }): React.JSX.Element {
+export function ToolGroupFixedSizePane({
+  children,
+  maxHeight,
+}: {
+  children: ReactNode;
+  maxHeight?: number;
+}): React.JSX.Element {
   return (
-    <Stack padding={1} overflowX="hidden" overflowY="auto" style={{ maxHeight: PANE_HEIGHT }}>
+    <Stack
+      padding={1}
+      overflowX="hidden"
+      overflowY="auto"
+      style={maxHeight != null ? { maxHeight } : undefined}
+    >
       {children}
     </Stack>
   );

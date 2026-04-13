@@ -98,7 +98,7 @@ const InteractionsBaseComponent = React.memo<Props>(function InteractionsBaseCom
       }}
     >
       <ToolGroup name={OBJECT_TAB_TYPE}>
-        <ToolGroupFixedSizePane>
+        <ToolGroupFixedSizePane maxHeight={isMapping ? undefined : 240}>
           {activeDroneId != undefined ? (
             isMapping ? (
               <WaypointPanel

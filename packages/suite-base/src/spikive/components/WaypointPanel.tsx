@@ -1,10 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (C) 2026 Spikive
 // SPDX-License-Identifier: MPL-2.0
 
+import ClearAllIcon from "@mui/icons-material/ClearAll";
+import DeleteIcon from "@mui/icons-material/Delete";
 import GpsFixedIcon from "@mui/icons-material/GpsFixed";
-import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import {
   Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
   FormControlLabel,
   IconButton,
   Radio,
@@ -16,20 +21,44 @@ import {
   TableHead,
   TableRow,
   TextField,
-  Tooltip,
   Typography,
 } from "@mui/material";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { makeStyles } from "tss-react/mui";
 
 import { MessageDefinition } from "@lichtblick/message-definition";
+import { ros1 } from "@lichtblick/rosmsg-msgs-common";
 import {
-  WaypointMarkerDatatypes,
-  makeWaypointMarkerArray,
-} from "@lichtblick/suite-base/panels/ThreeDeeRender/publish";
-import { ZMode, useWaypointStore } from "@lichtblick/suite-base/spikive/stores/useWaypointStore";
+  applyZ,
+  ZMode,
+  useWaypointStore,
+} from "@lichtblick/suite-base/spikive/stores/useWaypointStore";
+import { DEFAULT_DRONE_ID } from "@lichtblick/suite-base/spikive/config/topicConfig";
 
-const WAYPOINT_MARKERS_TOPIC = "/waypoint_markers";
+const POSE_TOPIC = "/add_waypoint";
+const REMOVE_TOPIC = "/remove_waypoint";
+const CLEAR_TOPIC = "/clear_waypoints";
+
+/** Minimal datatypes required for geometry_msgs/PoseStamped over ROS1. */
+const PoseStampedDatatypes = new Map<string, MessageDefinition>(
+  (
+    [
+      "geometry_msgs/Point",
+      "geometry_msgs/Pose",
+      "geometry_msgs/PoseStamped",
+      "geometry_msgs/Quaternion",
+      "std_msgs/Header",
+    ] as Array<keyof typeof ros1>
+  ).map((type) => [type, ros1[type]]),
+);
+
+const Int32Datatypes = new Map<string, MessageDefinition>([
+  ["std_msgs/Int32", ros1["std_msgs/Int32"]],
+]);
+
+const EmptyDatatypes = new Map<string, MessageDefinition>([
+  ["std_msgs/Empty", ros1["std_msgs/Empty"]],
+]);
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -58,7 +87,6 @@ const useStyles = makeStyles()((theme) => ({
     width: 64,
   },
   tableContainer: {
-    maxHeight: 120,
     overflow: "auto",
   },
   cell: {
@@ -94,75 +122,85 @@ export function WaypointPanel({
   unadvertise,
 }: WaypointPanelProps): React.JSX.Element {
   const { classes } = useStyles();
+  const [clearDialogOpen, setClearDialogOpen] = useState(false);
 
   // Read latest odom position from the store (pushed by ThreeDeeRender)
   const pos = useWaypointStore((s) => s.latestOdom[droneId]);
 
+  // Waypoint list comes from /waypoint_markers which is global (not drone-prefixed),
+  // so always read from DEFAULT_DRONE_ID regardless of which drone is active.
+  const waypointList = useWaypointStore((s) => s.tables[DEFAULT_DRONE_ID]?.waypoints ?? []);
+
+  // Z-settings are per active drone
   const droneState = useWaypointStore((s) => s.tables[droneId]);
-  const addWaypoint = useWaypointStore((s) => s.addWaypoint);
-  const removeWaypoint = useWaypointStore((s) => s.removeWaypoint);
-  const deleteLast = useWaypointStore((s) => s.deleteLast);
-  const clearWaypoints = useWaypointStore((s) => s.clearWaypoints);
   const updateZSettings = useWaypointStore((s) => s.updateZSettings);
   const getOrCreate = useWaypointStore((s) => s.getOrCreate);
 
-  // Ensure the drone table exists in the store on mount
+  // Ensure both the drone table and the global waypoint table exist
   useEffect(() => {
     getOrCreate(droneId);
+    getOrCreate(DEFAULT_DRONE_ID);
   }, [droneId, getOrCreate]);
+
+  // Advertise topics on mount
+  const advertised = useRef(false);
+  useEffect(() => {
+    if (!advertise) {
+      return;
+    }
+    advertise(POSE_TOPIC, "geometry_msgs/PoseStamped", { datatypes: PoseStampedDatatypes });
+    advertise(REMOVE_TOPIC, "std_msgs/Int32", { datatypes: Int32Datatypes });
+    advertise(CLEAR_TOPIC, "std_msgs/Empty", { datatypes: EmptyDatatypes });
+    advertised.current = true;
+    return () => {
+      unadvertise?.(POSE_TOPIC);
+      unadvertise?.(REMOVE_TOPIC);
+      unadvertise?.(CLEAR_TOPIC);
+      advertised.current = false;
+    };
+  }, [advertise, unadvertise]);
 
   const state = droneState ?? {
     waypoints: [],
     zMode: "none" as const,
     overrideZValue: 1.5,
-    zOffsetValue: 0.0,
   };
-
-  // ------------------------------------------------------------------
-  // Marker publishing
-  // ------------------------------------------------------------------
-  const advertised = useRef(false);
-
-  useEffect(() => {
-    if (!advertise) {
-      return;
-    }
-    advertise(WAYPOINT_MARKERS_TOPIC, "visualization_msgs/MarkerArray", {
-      datatypes: WaypointMarkerDatatypes,
-    });
-    advertised.current = true;
-    return () => {
-      unadvertise?.(WAYPOINT_MARKERS_TOPIC);
-      advertised.current = false;
-    };
-  }, [advertise, unadvertise]);
-
-  // Re-publish markers whenever waypoints change
-  useEffect(() => {
-    if (!publish || !advertised.current) {
-      return;
-    }
-    const msg = makeWaypointMarkerArray(state.waypoints, "world");
-    publish(WAYPOINT_MARKERS_TOPIC, msg);
-  }, [publish, state.waypoints]);
 
   // ------------------------------------------------------------------
   // Handlers
   // ------------------------------------------------------------------
   const handleRecord = useCallback(() => {
-    if (!pos) {
+    if (!pos || !publish || !advertised.current) {
       return;
     }
-    addWaypoint(droneId, pos.x, pos.y, pos.z);
-  }, [pos, droneId, addWaypoint]);
+    const adjustedZ = applyZ(pos.z, state);
+    const time = { sec: Math.floor(Date.now() / 1000), nsec: 0 };
+    publish(POSE_TOPIC, {
+      header: { stamp: time, frame_id: "world" },
+      pose: {
+        position: { x: pos.x, y: pos.y, z: adjustedZ },
+        orientation: { x: 0, y: 0, z: 0, w: 1 },
+      },
+    });
+  }, [pos, publish, state]);
 
-  const handleDeleteLast = useCallback(() => {
-    deleteLast(droneId);
-  }, [droneId, deleteLast]);
+  const handleRemove = useCallback(
+    (idx: number) => {
+      if (!publish || !advertised.current) {
+        return;
+      }
+      publish(REMOVE_TOPIC, { data: idx });
+    },
+    [publish],
+  );
 
-  const handleClearAll = useCallback(() => {
-    clearWaypoints(droneId);
-  }, [droneId, clearWaypoints]);
+  const handleClearConfirm = useCallback(() => {
+    if (!publish || !advertised.current) {
+      return;
+    }
+    publish(CLEAR_TOPIC, {});
+    setClearDialogOpen(false);
+  }, [publish]);
 
   const handleZModeChange = useCallback(
     (_e: React.ChangeEvent<HTMLInputElement>, value: string) => {
@@ -176,16 +214,6 @@ export function WaypointPanel({
       const val = parseFloat(e.target.value);
       if (!isNaN(val)) {
         updateZSettings(droneId, { overrideZValue: val });
-      }
-    },
-    [droneId, updateZSettings],
-  );
-
-  const handleZOffsetValue = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const val = parseFloat(e.target.value);
-      if (!isNaN(val)) {
-        updateZSettings(droneId, { zOffsetValue: val });
       }
     },
     [droneId, updateZSettings],
@@ -208,38 +236,21 @@ export function WaypointPanel({
         )}
       </div>
 
-      {/* Record + Delete Last + Clear All */}
+      {/* Record */}
       <div className={classes.buttonRow}>
         <Button
           size="small"
           variant="contained"
           color="primary"
           onClick={handleRecord}
-          disabled={!pos}
+          disabled={!pos || !publish}
           sx={{ flex: 1 }}
         >
           Record
         </Button>
-        <Button
-          size="small"
-          variant="outlined"
-          onClick={handleDeleteLast}
-          disabled={state.waypoints.length === 0}
-        >
-          Del Last
-        </Button>
-        <Button
-          size="small"
-          variant="outlined"
-          color="error"
-          onClick={handleClearAll}
-          disabled={state.waypoints.length === 0}
-        >
-          Clear
-        </Button>
       </div>
 
-      {/* Z mode: mutually exclusive radio */}
+      {/* Z mode: Raw Z or Override */}
       <RadioGroup row value={state.zMode} onChange={handleZModeChange}>
         <FormControlLabel
           value="none"
@@ -265,28 +276,10 @@ export function WaypointPanel({
             variant="outlined"
           />
         </div>
-        <div className={classes.zRow}>
-          <FormControlLabel
-            value="offset"
-            control={<Radio size="small" />}
-            label={<Typography variant="caption">Offset</Typography>}
-            sx={{ mr: 0.5 }}
-          />
-          <TextField
-            className={classes.zInput}
-            size="small"
-            type="number"
-            value={state.zOffsetValue}
-            onChange={handleZOffsetValue}
-            disabled={state.zMode !== "offset"}
-            inputProps={{ step: 0.1 }}
-            variant="outlined"
-          />
-        </div>
       </RadioGroup>
 
       {/* Waypoint Table */}
-      {state.waypoints.length > 0 && (
+      {waypointList.length > 0 && (
         <TableContainer className={classes.tableContainer}>
           <Table size="small" stickyHeader>
             <TableHead>
@@ -295,28 +288,36 @@ export function WaypointPanel({
                 <TableCell className={classes.headerCell}>X</TableCell>
                 <TableCell className={classes.headerCell}>Y</TableCell>
                 <TableCell className={classes.headerCell}>Z</TableCell>
-                <TableCell className={classes.headerCell} padding="none" />
+                <TableCell className={classes.headerCell} sx={{ p: 0 }}>
+                  <IconButton
+                    size="small"
+                    color="error"
+                    onClick={() => { setClearDialogOpen(true); }}
+                    disabled={!publish}
+                    sx={{ p: 0 }}
+                  >
+                    <ClearAllIcon sx={{ fontSize: "0.95rem" }} />
+                  </IconButton>
+                </TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {state.waypoints.map((wp) => (
+              {waypointList.map((wp) => (
                 <TableRow key={wp.idx} hover>
                   <TableCell className={classes.cell}>{wp.idx}</TableCell>
                   <TableCell className={classes.cell}>{wp.x}</TableCell>
                   <TableCell className={classes.cell}>{wp.y}</TableCell>
                   <TableCell className={classes.cell}>{wp.z}</TableCell>
-                  <TableCell className={classes.cell} padding="none">
-                    <Tooltip title="Remove">
-                      <IconButton
-                        size="small"
-                        onClick={() => {
-                          removeWaypoint(droneId, wp.idx);
-                        }}
-                        sx={{ padding: "1px" }}
-                      >
-                        <DeleteOutlineIcon sx={{ fontSize: 14 }} />
-                      </IconButton>
-                    </Tooltip>
+                  <TableCell className={classes.cell} sx={{ p: 0 }}>
+                    <IconButton
+                      size="small"
+                      color="error"
+                      onClick={() => { handleRemove(wp.idx); }}
+                      disabled={!publish}
+                      sx={{ p: 0 }}
+                    >
+                      <DeleteIcon sx={{ fontSize: "0.85rem" }} />
+                    </IconButton>
                   </TableCell>
                 </TableRow>
               ))}
@@ -324,6 +325,21 @@ export function WaypointPanel({
           </Table>
         </TableContainer>
       )}
+
+      {/* Clear confirmation dialog */}
+      <Dialog open={clearDialogOpen} onClose={() => { setClearDialogOpen(false); }}>
+        <DialogContent>
+          <DialogContentText>
+            Clear all {waypointList.length} waypoints?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setClearDialogOpen(false); }}>Cancel</Button>
+          <Button onClick={handleClearConfirm} color="error" variant="contained">
+            Clear
+          </Button>
+        </DialogActions>
+      </Dialog>
     </div>
   );
 }

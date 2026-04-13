@@ -89,6 +89,15 @@ const PUBLISH_TOPICS = {
 } as const;
 
 // ---------------------------------------------------------------------------
+// Waypoint marker colors (frontend-defined, overrides backend hardcoded colors)
+// ---------------------------------------------------------------------------
+export const WAYPOINT_COLORS = {
+  sphere: { r: 0.937, g: 0.514, b: 0.227, a: 1.0 }, // Spikive orange #EF833A
+  text: { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }, // white
+  line: { r: 0.612, g: 0.153, b: 0.69, a: 0.9 }, // purple #9C27B0
+};
+
+// ---------------------------------------------------------------------------
 // Assembled default config
 // ---------------------------------------------------------------------------
 export const TOPIC_CONFIG = {

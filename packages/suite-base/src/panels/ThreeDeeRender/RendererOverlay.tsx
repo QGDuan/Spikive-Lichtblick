@@ -48,6 +48,15 @@ const useStyles = makeStyles()((theme) => ({
     gap: 10,
     pointerEvents: "none",
   },
+  topLeft: {
+    position: "absolute",
+    top: 10,
+    left: 10,
+    display: "flex",
+    flexDirection: "row",
+    gap: 0,
+    pointerEvents: "none",
+  },
   iconButton: {
     position: "relative",
     pointerEvents: "auto",
@@ -350,10 +359,12 @@ export function RendererOverlay(props: Props): React.JSX.Element {
             />
           )
         }
-        {props.interfaceMode === "3d" && (
-          <Paper square={false} elevation={4} style={{ display: "flex", flexDirection: "column" }}>
+      </div>
+      {props.interfaceMode === "3d" && (
+        <div className={classes.topLeft}>
+          <Paper square={false} elevation={4} style={{ display: "flex", flexDirection: "row" }}>
             <Tooltip
-              placement="left"
+              placement="bottom"
               title={
                 <>
                   {`Switch to ${props.perspective ? "2" : "3"}D camera `}
@@ -371,7 +382,7 @@ export function RendererOverlay(props: Props): React.JSX.Element {
               </IconButton>
             </Tooltip>
             <Tooltip
-              placement="left"
+              placement="bottom"
               title={props.measureActive ? "Cancel measuring" : "Measure distance"}
             >
               <IconButton
@@ -387,8 +398,8 @@ export function RendererOverlay(props: Props): React.JSX.Element {
               </IconButton>
             </Tooltip>
           </Paper>
-        )}
-      </div>
+        </div>
+      )}
       {clickedObjects.length > 1 && !selectedObject && (
         <InteractionContextMenu
           onClose={() => {
