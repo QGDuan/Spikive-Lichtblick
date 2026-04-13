@@ -31,7 +31,7 @@ import {
   DEFAULT_FOLLOW_MODE,
   PANEL_STYLE,
 } from "@lichtblick/suite-base/panels/ThreeDeeRender/constants";
-import { TOPIC_CONFIG, DEFAULT_DRONE_ID, WAYPOINT_COLORS, extractDroneIdFromTopic } from "@lichtblick/suite-base/spikive/config/topicConfig";
+import { TOPIC_CONFIG, DEFAULT_DRONE_ID, WAYPOINT_COLORS, extractDroneIdFromTopic, PROJECT_TOPICS } from "@lichtblick/suite-base/spikive/config/topicConfig";
 import { useSceneModeStore } from "@lichtblick/suite-base/spikive/stores/useSceneModeStore";
 import { useWaypointStore } from "@lichtblick/suite-base/spikive/stores/useWaypointStore";
 import ThemeProvider from "@lichtblick/suite-base/theme/ThemeProvider";
@@ -639,6 +639,7 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
   const sceneMode = useSceneModeStore((s) => s.sceneMode);
   const updateOdom = useWaypointStore((s) => s.updateOdom);
   const setWaypointsFromMarkers = useWaypointStore((s) => s.setWaypointsFromMarkers);
+  const setProjectList = useWaypointStore((s) => s.setProjectList);
 
   // Notify the extension context when our subscription list changes.
   // In mapping mode, also subscribe to odom topics and /waypoint_markers.
@@ -667,6 +668,16 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
       if (waypointMarkerTopic) {
         extraSubs.push({
           topic: "/waypoint_markers",
+          preload: false as const,
+          sampling: { mode: "latest-per-render-tick" as const },
+        });
+      }
+
+      // Subscribe to /waypoint_project_list for project file list
+      const projectListTopic = topics.find((t) => t.name === PROJECT_TOPICS.projectList);
+      if (projectListTopic) {
+        extraSubs.push({
+          topic: PROJECT_TOPICS.projectList,
           preload: false as const,
           sampling: { mode: "latest-per-render-tick" as const },
         });
@@ -806,13 +817,25 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
           }
           continue;
         }
+
+        // Intercept /waypoint_project_list: parse project names into store
+        if (message.topic === PROJECT_TOPICS.projectList) {
+          try {
+            const payload = (message.message as { data: string }).data;
+            const data = JSON.parse(payload) as { projects?: string[] };
+            setProjectList(data.projects ?? []);
+          } catch {
+            // ignore malformed messages
+          }
+          continue;
+        }
       }
 
       renderer.addMessageEvent(message);
     }
 
     renderRef.current.needsRender = true;
-  }, [currentFrameMessages, renderer, sceneMode, updateOdom, setWaypointsFromMarkers]);
+  }, [currentFrameMessages, renderer, sceneMode, updateOdom, setWaypointsFromMarkers, setProjectList]);
 
   // Update the renderer when the camera moves
   useEffect(() => {

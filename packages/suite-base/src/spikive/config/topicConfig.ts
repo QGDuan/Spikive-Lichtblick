@@ -89,6 +89,17 @@ const PUBLISH_TOPICS = {
 } as const;
 
 // ---------------------------------------------------------------------------
+// Project management topics (waypoint save/load/delete/reorder)
+// ---------------------------------------------------------------------------
+export const PROJECT_TOPICS = {
+  saveWaypoints: "/save_waypoints",
+  loadWaypoints: "/load_waypoints",
+  deleteProject: "/delete_waypoint_project",
+  reorderWaypoints: "/reorder_waypoints",
+  projectList: "/waypoint_project_list",
+} as const;
+
+// ---------------------------------------------------------------------------
 // Waypoint marker colors (frontend-defined, overrides backend hardcoded colors)
 // ---------------------------------------------------------------------------
 export const WAYPOINT_COLORS = {
