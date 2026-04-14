@@ -58,6 +58,7 @@ The Spikive ground station uses a dynamic `drone_id` to route all ROS topic subs
 │    "/drone_2_ego_planner_node/goal_point": { ... }        │
 │    "/drone_2_odom_visualization/robot": { ... }           │
 │    "/drone_2_odom_visualization/path": { ... }            │
+│    "/drone_2_waypoint_markers": { ... }                   │
 │  }                                                        │
 │  followTf: "base2"                                        │
 └───────────────────────────────────────────────────────────┘
@@ -90,7 +91,7 @@ The Spikive ground station uses a dynamic `drone_id` to route all ROS topic subs
    - `remapTopics(oldTopics, "1", "2")`:
      - `/drone_1_cloud_registered` → `/drone_2_cloud_registered`
      - `/drone_1_ego_planner_node/optimal_list` → `/drone_2_ego_planner_node/optimal_list`
-     - (same for all 5 topics)
+     - (same for all 6 topics)
    - `followTf` → `"base2"`.
    - `savePanelConfigs({ override: true, config: newConfig })`.
 6. 3D Panel now subscribes to all `/drone_2_xxx` topics.
@@ -148,14 +149,15 @@ toId:   "2"
 Step 1: Build key map from droneTopics("1") → droneTopics("2")
         /drone_1_cloud_registered → /drone_2_cloud_registered
         /drone_1_ego_planner_node/optimal_list → /drone_2_ego_planner_node/optimal_list
-        ... (5 pairs total)
+        /drone_1_waypoint_markers → /drone_2_waypoint_markers
+        ... (6 pairs total)
 
 Step 2: For each old key:
         - If in keyMap → write to new key with same settings
         - Else → keep as-is (non-drone keys preserved)
 
-Step 3: Ensure all 5 target topics exist.
-        If any missing → add with { visible: true }.
+Step 3: Ensure all 6 target topics exist.
+        If any missing → add with { visible: true } (plus pickable: false where applicable).
 
 Output: { "/drone_2_cloud_registered": { visible: true, colorMap: "rainbow", ... } }
 ```
@@ -177,6 +179,7 @@ Output: { "/drone_2_cloud_registered": { visible: true, colorMap: "rainbow", ...
 | Duplicate droneId attempt | Blocked with error message |
 | Invalid droneId input ("abc", "") | Blocked at dialog validation |
 | Topic missing in old config | Auto-added with `{ visible: true }` |
+| Waypoint markers per-drone routing | `waypointMarkers` is included in `TOPIC_FIELDS` and remapped like other topics; `ThreeDeeRender` no longer needs a manual extra subscription |
 
 ### Known Limitations
 
@@ -194,11 +197,13 @@ Output: { "/drone_2_cloud_registered": { visible: true, colorMap: "rainbow", ...
 
 | File | Role |
 |---|---|
-| `packages/suite-base/src/spikive/config/topicConfig.ts` | `DEFAULT_DRONE_ID`, `droneTopics()`, `droneBodyFrame()`, `TOPIC_CONFIG` |
-| `packages/suite-base/src/spikive/hooks/useActiveDroneRouting.ts` | Watches active droneId, rewrites panel config |
+| `packages/suite-base/src/spikive/config/topicConfig.ts` | `DEFAULT_DRONE_ID`, `droneTopics()` (15 fields incl. waypoint topics), `droneBodyFrame()`, `extractDroneIdFromTopic()`, `TOPIC_CONFIG` |
+| `packages/suite-base/src/spikive/hooks/useActiveDroneRouting.ts` | Watches active droneId; `TOPIC_FIELDS` (6 entries incl. `waypointMarkers`), `remapTopics()` rewrites panel config |
+| `packages/suite-base/src/spikive/stores/useWaypointStore.ts` | Waypoint state per drone: `projectLists: Record<string, string[]>` keyed by droneId |
 | `packages/suite-base/src/components/MultiRobotSidebar/types.ts` | `RobotEntry` (with `droneId`), `MultiRobotStore` |
 | `packages/suite-base/src/components/MultiRobotSidebar/useRobotConnections.ts` | Zustand store with mutex checks |
 | `packages/suite-base/src/components/MultiRobotSidebar/AddRobotDialog.tsx` | Input validation (droneId + URL) |
 | `packages/suite-base/src/components/MultiRobotSidebar/RobotCard.tsx` | Displays "Drone {id}" + URL subtitle |
 | `packages/suite-base/src/components/MultiRobotSidebar/index.tsx` | Wires dialog → store → routing hook |
-| `packages/suite-base/src/providers/CurrentLayoutProvider/defaultLayout.ts` | Initial 3D Panel config using `TOPIC_CONFIG` |
+| `packages/suite-base/src/providers/CurrentLayoutProvider/defaultLayout.ts` | Initial 3D Panel config using `TOPIC_CONFIG.subscribe` (incl. `waypointMarkers`) |
+| `packages/suite-base/src/panels/ThreeDeeRender/ThreeDeeRender.tsx` | `waypoint_markers` via config routing; `waypoint_project_list` via regex subscription for all drones |

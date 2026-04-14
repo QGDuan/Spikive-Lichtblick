@@ -40,7 +40,7 @@
 
 - **Topic 命名规范**：`/drone_{id}_{base_topic}`（如 `/drone_1_cloud_registered`）
 - **TF 帧命名**：`base{id}`（如 `base1`）
-- **路由函数**：`droneTopics(id)` 输入一个 ID，输出完整的 5 个 topic 路径
+- **路由函数**：`droneTopics(id)` 输入一个 ID，输出完整的 15 个 topic 路径（含航点相关 topic）
 - 切换活跃无人机时，通过 `useActiveDroneRouting` hook 重写 3D Panel 的全部 topic 订阅
 
 ### 1.4 Zustand 单向数据流
@@ -156,14 +156,15 @@
 ║  │  发布方向 (前端 → ROS):                                         │    ║
 ║  │    /control                            (controller_msgs/cmd)   │    ║
 ║  │    /goal_with_id                       (quadrotor_msgs/GoalSet)│    ║
-║  │    /waypoint_markers                   (MarkerArray)           │    ║
-║  │    /save_waypoints                     (std_msgs/String)       │    ║
-║  │    /load_waypoints                     (std_msgs/String)       │    ║
-║  │    /delete_waypoint_project            (std_msgs/String)       │    ║
-║  │    /reorder_waypoints                  (std_msgs/String)       │    ║
+║  │    /drone_{id}_waypoint_markers        (MarkerArray)           │    ║
+║  │    /drone_{id}_save_waypoints          (std_msgs/String)       │    ║
+║  │    /drone_{id}_load_waypoints          (std_msgs/String)       │    ║
+║  │    /drone_{id}_delete_waypoint_project (std_msgs/String)       │    ║
+║  │    /drone_{id}_reorder_waypoints       (std_msgs/String)       │    ║
 ║  │                                                                │    ║
-║  │  订阅方向 (ROS → 前端, 全局):                                    │    ║
-║  │    /waypoint_project_list              (std_msgs/String)       │    ║
+║  │  订阅方向 (ROS → 前端, per-drone):                               │    ║
+║  │    /drone_{id}_waypoint_markers        (MarkerArray)           │    ║
+║  │    /drone_{id}_waypoint_project_list   (std_msgs/String)       │    ║
 ║  └────────────────────────────────────────────────────────────────┘    ║
 ║                                                                        ║
 ║  ┌────────────────────┐  ┌─────────────────┐                          ║
@@ -223,11 +224,11 @@ Workspace (根组件)
             └── [mapping] WaypointPanel
                 ├── 实时位置显示 ··········· 读: useWaypointStore.latestOdom
                 ├── 航点录制 ·············· 写: useWaypointStore.addWaypoint()
-                ├── Marker 发布 ··········· 写: publish /waypoint_markers
-                ├── 拖拽排序 ·············· 写: publish /reorder_waypoints
-                ├── SaveProjectDialog ····· 读: useWaypointStore.projectList
-                ├── LoadProjectDialog ····· 读: useWaypointStore.projectList
-                └── ManageProjectsDialog ·· 读: useWaypointStore.projectList
+                ├── Marker 发布 ··········· 写: publish /drone_{id}_waypoint_markers
+                ├── 拖拽排序 ·············· 写: publish /drone_{id}_reorder_waypoints
+                ├── SaveProjectDialog ····· prop: projectList (from store via WaypointPanel)
+                ├── LoadProjectDialog ····· prop: projectList (from store via WaypointPanel)
+                └── ManageProjectsDialog ·· prop: projectList (from store via WaypointPanel)
 
 图例:
   ─── 组件父子关系      ···· 数据依赖 (读/写 Store 或 Context)
@@ -270,17 +271,18 @@ Workspace (根组件)
 │      | "mapping-waypoint"    │  │    latestOdom:                 │
 │                              │  │      Record<droneId,           │
 │  写入者:                      │  │        OdomPosition>           │
-│    SceneSelectionDialog      │  │    projectList: string[]       │
-│    → setSceneMode()          │  │      (可用航点项目名列表)        │
-│                              │  │                                │
-│  读取者:                      │  │  写入者:                        │
-│    Interactions              │  │    ThreeDeeRender              │
-│    (分支: DroneControl       │  │    → updateOdom() [odom 拦截]   │
-│     vs Waypoint)             │  │    → setWaypointsFromMarkers() │
-│    ThreeDeeRender            │  │      [marker 颜色覆盖时解析]    │
-│    (odom 订阅开关)            │  │    → setProjectList()          │
-│                              │  │      [/waypoint_project_list   │
-│                              │  │       消息拦截]                 │
+│    SceneSelectionDialog      │  │    projectLists:               │
+│    → setSceneMode()          │  │      Record<droneId, string[]> │
+│                              │  │      (per-drone 航点项目名列表)  │
+│  读取者:                      │  │                                │
+│    Interactions              │  │  写入者:                        │
+│    (分支: DroneControl       │  │    ThreeDeeRender              │
+│     vs Waypoint)             │  │    → updateOdom() [odom 拦截]   │
+│    ThreeDeeRender            │  │    → setWaypointsFromMarkers() │
+│    (odom 订阅开关)            │  │      [marker 颜色覆盖时解析]    │
+│                              │  │    → setProjectList(droneId)   │
+│                              │  │      [/drone_{id}_waypoint_    │
+│                              │  │       project_list 消息拦截]    │
 │                              │  │    WaypointPanel               │
 │                              │  │    → addWaypoint()             │
 │                              │  │    → removeWaypoint()          │
@@ -292,18 +294,19 @@ Workspace (根组件)
 │                              │  │    WaypointPanel               │
 │                              │  │    → latestOdom[droneId]       │
 │                              │  │    → tables[droneId].waypoints │
-│                              │  │    SaveProjectDialog           │
-│                              │  │    LoadProjectDialog           │
-│                              │  │    ManageProjectsDialog        │
-│                              │  │    → projectList               │
+│                              │  │    → projectLists[droneId]     │
+│                              │  │    SaveProjectDialog (prop)    │
+│                              │  │    LoadProjectDialog (prop)    │
+│                              │  │    ManageProjectsDialog (prop) │
 └──────────────────────────────┘  └────────────────────────────────┘
 
 数据流方向:
   SceneSelectionDialog ──设置模式──► useSceneModeStore ──读取──► Interactions / ThreeDeeRender
   AddRobotDialog ──添加机器人──► useRobotConnectionsStore ──读取──► useActiveDroneRouting
   ThreeDeeRender ──odom拦截──► useWaypointStore ──读取──► WaypointPanel
-  ThreeDeeRender ──marker拦截──► useWaypointStore.setWaypointsFromMarkers()
-  ThreeDeeRender ──projectList拦截──► useWaypointStore.setProjectList() ──读取──► Dialogs
+  ThreeDeeRender ──marker拦截──► useWaypointStore.setWaypointsFromMarkers(droneId, ...)
+  ThreeDeeRender ──projectList拦截──► useWaypointStore.setProjectList(droneId, list) ──prop──► Dialogs
+  WaypointPanel ──读取projectLists[droneId]──► 通过 prop 传递给 Save/Load/Manage Dialogs
 ```
 
 ---
@@ -433,7 +436,8 @@ Workspace (根组件)
   ║                          ▼                                ║
   ║  ┌─────────────────────────────────────────────────────┐  ║
   ║  │           3D Panel 渲染 (ThreeDeeRender)             │  ║
-  ║  │  droneTopics(id) 动态路由订阅 5 个 topic             │  ║
+  ║  │  droneTopics(id) 动态路由订阅 6 个 topic             │  ║
+  ║  │  (含 waypointMarkers, 由 useActiveDroneRouting 驱动)  │  ║
   ║  │  Pickable 过滤 (仅机器人模型可点选)                    │  ║
   ║  │  Camera followTf = base{id}                         │  ║
   ║  └─────────────────────────────────────────────────────┘  ║
@@ -458,18 +462,25 @@ Workspace (根组件)
    │ │ Publish Pose   ││       │ │ MarkerArray 发布     │  │
    │ └────────────────┘│       │ └────────────────────┘  │
    │                    │       │                        │
-   │ 发布:               │       │ 发布:                   │
-   │  /control (cmd)    │       │  /waypoint_markers      │
-   │  /goal_with_id     │       │  /save_waypoints        │
-   │  (GoalSet)         │       │  /load_waypoints        │
-   └────────────────────┘       │  /delete_waypoint_project│
-                                │  /reorder_waypoints     │
+   │ 发布:               │       │ 发布 (per-drone):       │
+   │  /control (cmd)    │       │  /drone_{id}_waypoint_  │
+   │  /goal_with_id     │       │    markers              │
+   │  (GoalSet)         │       │  /drone_{id}_save_      │
+   └────────────────────┘       │    waypoints            │
+                                │  /drone_{id}_load_      │
+                                │    waypoints            │
+                                │  /drone_{id}_delete_    │
+                                │    waypoint_project     │
+                                │  /drone_{id}_reorder_   │
+                                │    waypoints            │
                                 │                        │
                                 │ ThreeDeeRender 额外行为: │
                                 │  +odom topic 动态订阅    │
                                 │  +odom 消息拦截→Store    │
-                                │  +颜色覆盖拦截           │
-                                │  +projectList 拦截→Store │
+                                │  +per-drone waypoint_   │
+                                │    markers 颜色覆盖拦截  │
+                                │  +per-drone projectList │
+                                │    (regex 订阅) 拦截     │
                                 └────────────────────────┘
 ```
 
@@ -486,7 +497,7 @@ Workspace (根组件)
                      └─────────────┘
 
   ┌───────────────────────────────────────────────────────────────┐
-  │                    Topic 映射表                                │
+  │                 Topic 映射表 (droneTopics 15 字段)              │
   │                                                               │
   │  BASE_TOPICS              droneTopics("1")                    │
   │  ─────────────            ──────────────────────────────────  │
@@ -500,6 +511,17 @@ Workspace (根组件)
   │  odom_visualization/ ──►  /drone_1_odom_visualization/        │
   │    path                       path                            │
   │  visual_slam/odom    ──►  /drone_1_visual_slam/odom           │
+  │  add_waypoint        ──►  /drone_1_add_waypoint               │
+  │  remove_waypoint     ──►  /drone_1_remove_waypoint            │
+  │  clear_waypoints     ──►  /drone_1_clear_waypoints            │
+  │  save_waypoints      ──►  /drone_1_save_waypoints             │
+  │  load_waypoints      ──►  /drone_1_load_waypoints             │
+  │  delete_waypoint_    ──►  /drone_1_delete_waypoint_project    │
+  │    project                                                    │
+  │  reorder_waypoints   ──►  /drone_1_reorder_waypoints          │
+  │  waypoint_markers    ──►  /drone_1_waypoint_markers           │
+  │  waypoint_project_   ──►  /drone_1_waypoint_project_list      │
+  │    list                                                       │
   └───────────────────────────────────────────────────────────────┘
 
   ┌───────────────────────────────────────────────────────────────┐
@@ -513,38 +535,59 @@ Workspace (根组件)
   └───────────────────────────────────────────────────────────────┘
 
   ┌───────────────────────────────────────────────────────────────┐
-  │                  全局 Topic (不带 drone_id 前缀)                │
+  │              全局 Topic (不带 drone_id 前缀)                     │
   │                                                               │
-  │  发布方向 (前端 → ROS):                                        │
   │  /control            ◄── DroneControlPanel 发布飞行指令         │
   │  /goal_with_id       ◄── ThreeDeeRender 发布 GoalSet 目标点    │
-  │  /waypoint_markers   ◄── WaypointPanel 发布航点可视化标记        │
   │  /move_base_simple/  ◄── 3D Panel Publish Pose 工具            │
   │    goal                                                       │
-  │                                                               │
-  │  项目管理 Topic (前端 → ROS):                                   │
-  │  /save_waypoints     ◄── WaypointPanel 保存航点项目             │
-  │  /load_waypoints     ◄── WaypointPanel 加载航点项目             │
-  │  /delete_waypoint_   ◄── WaypointPanel 删除航点项目             │
-  │    project                                                    │
-  │  /reorder_waypoints  ◄── WaypointPanel 重排航点顺序             │
-  │                                                               │
-  │  项目管理 Topic (ROS → 前端):                                   │
-  │  /waypoint_project_  ──► ThreeDeeRender 拦截 → setProjectList()│
-  │    list                                                       │
   └───────────────────────────────────────────────────────────────┘
 
   ┌───────────────────────────────────────────────────────────────┐
-  │              Topic 切换流程 (切换活跃无人机)                      │
+  │         Per-Drone Waypoint Topic (drone_{id}_ 前缀)             │
+  │                                                               │
+  │  发布方向 (前端 → ROS, 由 WaypointPanel 通过 droneTopics(id)   │
+  │  动态构建 topic 名称):                                          │
+  │  /drone_{id}_waypoint_markers        (MarkerArray)             │
+  │  /drone_{id}_add_waypoint            (std_msgs/String)         │
+  │  /drone_{id}_remove_waypoint         (std_msgs/String)         │
+  │  /drone_{id}_clear_waypoints         (std_msgs/String)         │
+  │  /drone_{id}_save_waypoints          (std_msgs/String)         │
+  │  /drone_{id}_load_waypoints          (std_msgs/String)         │
+  │  /drone_{id}_delete_waypoint_project (std_msgs/String)         │
+  │  /drone_{id}_reorder_waypoints       (std_msgs/String)         │
+  │                                                               │
+  │  订阅方向 (ROS → 前端):                                        │
+  │  /drone_{id}_waypoint_markers  ──► config 路由(6 字段之一)      │
+  │    useActiveDroneRouting 自动重映射                              │
+  │    ThreeDeeRender 正则拦截 + 颜色覆盖 → setWaypointsFromMarkers │
+  │                                                               │
+  │  /drone_{id}_waypoint_project_list                             │
+  │    ThreeDeeRender 正则订阅所有 drone 的 project_list            │
+  │    (/^\/drone_\d+_waypoint_project_list$/)                     │
+  │    → setProjectList(droneId, list)                             │
+  └───────────────────────────────────────────────────────────────┘
+
+  ┌───────────────────────────────────────────────────────────────┐
+  │          Topic 切换流程 (切换活跃无人机, 6 字段路由)               │
   │                                                               │
   │  useActiveDroneRouting 监测到 activeRobot.droneId 变化:        │
+  │                                                               │
+  │  TOPIC_FIELDS (6 字段):                                        │
+  │    pointCloud, optimalTrajectory, goalPoint,                  │
+  │    robotModel, path, waypointMarkers                          │
   │                                                               │
   │  remapTopics(fromId="1", toId="2"):                           │
   │                                                               │
   │    /drone_1_cloud_registered        ──►  /drone_2_cloud_...   │
   │    /drone_1_ego_planner_node/...    ──►  /drone_2_ego_...     │
   │    /drone_1_odom_visualization/...  ──►  /drone_2_odom_...    │
+  │    /drone_1_waypoint_markers        ──►  /drone_2_waypoint_...│
   │    camera.followTf: "base1"         ──►  "base2"              │
+  │                                                               │
+  │  NON_PICKABLE_FIELDS:                                         │
+  │    pointCloud, optimalTrajectory, goalPoint,                  │
+  │    path, waypointMarkers  (仅 robotModel 可点选)               │
   │                                                               │
   │  同时确保 pickable flags 正确 (ensurePickableFlags)             │
   └───────────────────────────────────────────────────────────────┘
@@ -553,12 +596,15 @@ Workspace (根组件)
   │               extractDroneIdFromTopic() 反向提取                │
   │                                                               │
   │  输入: "/drone_3_cloud_registered"                              │
-  │  正则: /^\/drone_(\w+)_/                                       │
+  │  正则: /^\/drone_(\d+)_/                                       │
   │  输出: "3"                                                     │
   │                                                               │
   │  用途:                                                         │
   │    - Interactions.tsx: 从选中对象的 topic 提取 droneId           │
   │    - ThreeDeeRender.tsx: 从 odom 消息的 topic 提取 droneId      │
+  │    - ThreeDeeRender.tsx: 从 waypoint_markers 消息提取 droneId   │
+  │    - ThreeDeeRender.tsx: 从 waypoint_project_list 消息提取      │
+  │      droneId (正则 /^\/drone_\d+_waypoint_markers$/ 等)        │
   │    - DroneControlPanel: 确定控制指令发送给哪架无人机               │
   └───────────────────────────────────────────────────────────────┘
 ```
@@ -570,8 +616,9 @@ Workspace (根组件)
 | 能力 | 自主飞行 | 建图打点 | 类型 |
 | --- | --- | --- | --- |
 | MultiRobotSidebar (机器人管理) | Y | Y | 共享 |
-| droneTopics 路由 + Topic 重映射 | Y | Y | 共享 |
+| droneTopics 路由 + Topic 重映射 (6 字段) | Y | Y | 共享 |
 | Pickable Filter (仅机器人可点选) | Y | Y | 共享 |
+| waypointMarkers 路由 (useActiveDroneRouting 第 6 字段) | Y | Y | 共享 |
 | WebSocket 健康监控 | Y | Y | 共享 |
 | SceneSelectionDialog | Y | Y | 共享 (启动时) |
 | defaultLayout 锁定布局 | Y | Y | 共享 |
@@ -579,10 +626,11 @@ Workspace (根组件)
 | GoalSet 发布 (/goal_with_id) | **Y** | N | **差异** |
 | WaypointPanel (航点录制) | N | **Y** | **差异** |
 | Odom 拦截 → Store | N | **Y** | **差异** |
-| MarkerArray 发布 (/waypoint_markers) | N | **Y** | **差异** |
-| 颜色覆盖拦截 (WAYPOINT_COLORS) | N | **Y** | **差异** |
-| 项目管理 (Save/Load/Delete/Manage) | N | **Y** | **差异** |
+| Per-drone MarkerArray 发布 (/drone_{id}_waypoint_markers) | N | **Y** | **差异** |
+| 颜色覆盖拦截 (WAYPOINT_COLORS, per-drone regex) | N | **Y** | **差异** |
+| 项目管理 (Save/Load/Delete/Manage, per-drone topics) | N | **Y** | **差异** |
 | 拖拽排序 (DraggableWaypointRow) | N | **Y** | **差异** |
+| Per-drone projectList (regex 订阅 + store 按 droneId) | N | **Y** | **差异** |
 | lastDroneIdRef 持久化选中 | N | **Y** | **差异** |
 
 **分支点**：`Interactions.tsx` 中根据 `useSceneModeStore.sceneMode` 的值决定渲染哪个面板。
@@ -601,7 +649,7 @@ Workspace (根组件)
 | 目标设置 | 3D 点击 → GoalSet → /goal_with_id | ego_replan_fsm 接收并规划轨迹 |
 | 轨迹规划 | — | EGO-Planner 避障 + 最优轨迹生成 |
 | 航点录制 | odom 拦截 → Z 调整 → 存储 | — |
-| 航点可视化 | MarkerArray → /waypoint_markers + 颜色覆盖 | 3D Panel 自身渲染 (回环) |
-| 航点项目持久化 | Dialog UI + topic 发布 (save/load/delete/reorder) | waypoint_manager 磁盘存储 + 列表推送 |
+| 航点可视化 | MarkerArray → /drone_{id}_waypoint_markers + 颜色覆盖 | 3D Panel 自身渲染 (回环) |
+| 航点项目持久化 | Dialog UI + per-drone topic 发布 (save/load/delete/reorder) | waypoint_recorder 磁盘存储 + 列表推送 (每机独立实例, ~drone_id 参数) |
 | 定位 (SLAM) | — | Visual SLAM 输出 Odometry + TF |
 | TF 广播 | camera followTf 跟随 | odom_visualization 广播 world→base{id} |

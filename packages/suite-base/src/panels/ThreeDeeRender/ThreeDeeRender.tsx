@@ -31,7 +31,13 @@ import {
   DEFAULT_FOLLOW_MODE,
   PANEL_STYLE,
 } from "@lichtblick/suite-base/panels/ThreeDeeRender/constants";
-import { TOPIC_CONFIG, DEFAULT_DRONE_ID, WAYPOINT_COLORS, extractDroneIdFromTopic, PROJECT_TOPICS } from "@lichtblick/suite-base/spikive/config/topicConfig";
+import {
+  TOPIC_CONFIG,
+  WAYPOINT_COLORS,
+  extractDroneIdFromTopic,
+  TELEMETRY_TOPICS,
+} from "@lichtblick/suite-base/spikive/config/topicConfig";
+import { useDroneTelemetryStore } from "@lichtblick/suite-base/spikive/stores/useDroneTelemetryStore";
 import { useSceneModeStore } from "@lichtblick/suite-base/spikive/stores/useSceneModeStore";
 import { useWaypointStore } from "@lichtblick/suite-base/spikive/stores/useWaypointStore";
 import ThemeProvider from "@lichtblick/suite-base/theme/ThemeProvider";
@@ -641,18 +647,21 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
   const setWaypointsFromMarkers = useWaypointStore((s) => s.setWaypointsFromMarkers);
   const setProjectList = useWaypointStore((s) => s.setProjectList);
 
+  // Spikive: telemetry store for battery / GPS
+  const updateBattery = useDroneTelemetryStore((s) => s.updateBattery);
+
   // Notify the extension context when our subscription list changes.
   // In mapping mode, also subscribe to odom topics and /waypoint_markers.
+  // Always subscribe to telemetry topics (battery, GPS).
   useEffect(() => {
     if (!topicsToSubscribe) {
       return;
     }
 
     let subs = topicsToSubscribe;
+    const extraSubs: typeof subs = [];
 
     if (sceneMode === "mapping-waypoint" && topics) {
-      const extraSubs: typeof subs = [];
-
       // Subscribe to all odom topics for position display
       const odomSubs = topics
         .filter((t) => /^\/drone_\w+_visual_slam\/odom$/.test(t.name))
@@ -663,30 +672,35 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
         }));
       extraSubs.push(...odomSubs);
 
-      // Subscribe to /waypoint_markers for backend-driven waypoint list
-      const waypointMarkerTopic = topics.find((t) => t.name === "/waypoint_markers");
-      if (waypointMarkerTopic) {
+      // Subscribe to all per-drone waypoint_project_list topics
+      const projectListSubs = topics
+        .filter((t) => /^\/drone_\d+_waypoint_project_list$/.test(t.name))
+        .map((t) => ({
+          topic: t.name,
+          preload: false as const,
+          sampling: { mode: "latest-per-render-tick" as const },
+        }));
+      extraSubs.push(...projectListSubs);
+
+      log.info(
+        `[Spikive] Mapping mode: ${odomSubs.length} odom + ${projectListSubs.length} project_list`,
+      );
+    }
+
+    // Spikive: always subscribe to telemetry topics (battery)
+    if (topics) {
+      const batteryTopic = topics.find((t) => t.name === TELEMETRY_TOPICS.battery);
+      if (batteryTopic) {
         extraSubs.push({
-          topic: "/waypoint_markers",
+          topic: TELEMETRY_TOPICS.battery,
           preload: false as const,
           sampling: { mode: "latest-per-render-tick" as const },
         });
       }
+    }
 
-      // Subscribe to /waypoint_project_list for project file list
-      const projectListTopic = topics.find((t) => t.name === PROJECT_TOPICS.projectList);
-      if (projectListTopic) {
-        extraSubs.push({
-          topic: PROJECT_TOPICS.projectList,
-          preload: false as const,
-          sampling: { mode: "latest-per-render-tick" as const },
-        });
-      }
-
-      log.info(`[Spikive] Mapping mode: ${odomSubs.length} odom + ${waypointMarkerTopic ? 1 : 0} waypoint_markers`);
-      if (extraSubs.length > 0) {
-        subs = [...topicsToSubscribe, ...extraSubs];
-      }
+    if (extraSubs.length > 0) {
+      subs = [...topicsToSubscribe, ...extraSubs];
     }
 
     log.debug(`Subscribing to [${subs.map((t) => JSON.stringify(t)).join(", ")}]`);
@@ -763,14 +777,14 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
             };
             const p = odom?.pose?.pose?.position;
             if (p) {
-              log.info(`[Spikive] Odom update drone=${droneId}: ${p.x.toFixed(3)}, ${p.y.toFixed(3)}, ${p.z.toFixed(3)}`);
+              // log.info(`[Spikive] Odom update drone=${droneId}: ${p.x.toFixed(3)}, ${p.y.toFixed(3)}, ${p.z.toFixed(3)}`);
               updateOdom(droneId, { x: p.x, y: p.y, z: p.z });
             }
           }
         }
 
-        // Intercept /waypoint_markers: rewrite colors before rendering, then parse for store
-        if (message.topic === "/waypoint_markers") {
+        // Intercept per-drone /waypoint_markers: rewrite colors before rendering, then parse for store
+        if (/^\/drone_\d+_waypoint_markers$/.test(message.topic)) {
           const markerArray = message.message as {
             markers?: Array<{
               id?: number;
@@ -810,20 +824,28 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
               y: Math.round((m.pose?.position?.y ?? 0) * 1000) / 1000,
               z: Math.round((m.pose?.position?.z ?? 0) * 1000) / 1000,
             }));
-            log.info(`[Spikive] /waypoint_markers received: ${markerArray.markers.length} markers, ${spheres.length} spheres → store updated`);
-            setWaypointsFromMarkers(DEFAULT_DRONE_ID, waypoints);
+            log.info(
+              `[Spikive] waypoint_markers received from ${message.topic}: ${markerArray.markers.length} markers, ${spheres.length} spheres → store updated`,
+            );
+            const markerDroneId = extractDroneIdFromTopic(message.topic);
+            if (markerDroneId != undefined) {
+              setWaypointsFromMarkers(markerDroneId, waypoints);
+            }
           } else {
             renderer.addMessageEvent(message);
           }
           continue;
         }
 
-        // Intercept /waypoint_project_list: parse project names into store
-        if (message.topic === PROJECT_TOPICS.projectList) {
+        // Intercept per-drone /waypoint_project_list: parse project names into store
+        if (/^\/drone_\d+_waypoint_project_list$/.test(message.topic)) {
           try {
             const payload = (message.message as { data: string }).data;
             const data = JSON.parse(payload) as { projects?: string[] };
-            setProjectList(data.projects ?? []);
+            const projectDroneId = extractDroneIdFromTopic(message.topic);
+            if (projectDroneId != undefined) {
+              setProjectList(projectDroneId, data.projects ?? []);
+            }
           } catch {
             // ignore malformed messages
           }
@@ -831,11 +853,28 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
         }
       }
 
+      // Spikive: intercept battery messages (all modes)
+      if (message.topic === TELEMETRY_TOPICS.battery) {
+        const batteryMsg = message.message as { voltage?: number };
+        if (batteryMsg.voltage != undefined) {
+          updateBattery(batteryMsg.voltage);
+        }
+        continue; // battery data is UI-only, no 3D rendering needed
+      }
+
       renderer.addMessageEvent(message);
     }
 
     renderRef.current.needsRender = true;
-  }, [currentFrameMessages, renderer, sceneMode, updateOdom, setWaypointsFromMarkers, setProjectList]);
+  }, [
+    currentFrameMessages,
+    renderer,
+    sceneMode,
+    updateOdom,
+    setWaypointsFromMarkers,
+    setProjectList,
+    updateBattery,
+  ]);
 
   // Update the renderer when the camera moves
   useEffect(() => {
@@ -1018,10 +1057,7 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
             // drone_id was locked from the selected object's topic at publish start
             const droneIdStr = publishDroneIdRef.current;
             if (droneIdStr != undefined) {
-              const goalSetMsg = makeGoalSetMessage(
-                Number(droneIdStr),
-                event.pose.position,
-              );
+              const goalSetMsg = makeGoalSetMessage(Number(droneIdStr), event.pose.position);
               log.info(
                 `Publishing GoalSet to ${TOPIC_CONFIG.publish.goalWithId}: drone_id=${droneIdStr}, goal=[${event.pose.position.x}, ${event.pose.position.y}, ${event.pose.position.z}]`,
               );

@@ -13,24 +13,23 @@ import {
 } from "@mui/material";
 import { useCallback, useState } from "react";
 
-import { useWaypointStore } from "@lichtblick/suite-base/spikive/stores/useWaypointStore";
-
 const NAME_REGEX = /^[a-zA-Z0-9]*$/;
 
 type SaveProjectDialogProps = {
   open: boolean;
   onClose: () => void;
   onSave: (name: string) => void;
+  projectList: string[];
 };
 
 export function SaveProjectDialog({
   open,
   onClose,
   onSave,
+  projectList,
 }: SaveProjectDialogProps): React.JSX.Element {
   const [name, setName] = useState("waypoint");
   const [error, setError] = useState<string | undefined>();
-  const projectList = useWaypointStore((s) => s.projectList);
 
   const handleNameChange = useCallback((_e: unknown, value: string) => {
     if (!NAME_REGEX.test(value)) {

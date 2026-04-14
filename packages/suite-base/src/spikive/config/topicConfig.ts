@@ -21,6 +21,17 @@ const BASE_TOPICS = {
   robotModel: "odom_visualization/robot",
   path: "odom_visualization/path",
   odom: "visual_slam/odom",
+  // Waypoint action topics
+  addWaypoint: "add_waypoint",
+  removeWaypoint: "remove_waypoint",
+  clearWaypoints: "clear_waypoints",
+  saveWaypoints: "save_waypoints",
+  loadWaypoints: "load_waypoints",
+  deleteProject: "delete_waypoint_project",
+  reorderWaypoints: "reorder_waypoints",
+  // Waypoint response topics
+  waypointMarkers: "waypoint_markers",
+  waypointProjectList: "waypoint_project_list",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -33,6 +44,15 @@ export type DroneTopics = {
   robotModel: string;
   path: string;
   odom: string;
+  addWaypoint: string;
+  removeWaypoint: string;
+  clearWaypoints: string;
+  saveWaypoints: string;
+  loadWaypoints: string;
+  deleteProject: string;
+  reorderWaypoints: string;
+  waypointMarkers: string;
+  waypointProjectList: string;
 };
 
 /** Build fully-qualified topic names for a given drone ID. */
@@ -45,6 +65,15 @@ export function droneTopics(droneId: string | number): DroneTopics {
     robotModel: `/drone_${id}_${BASE_TOPICS.robotModel}`,
     path: `/drone_${id}_${BASE_TOPICS.path}`,
     odom: `/drone_${id}_${BASE_TOPICS.odom}`,
+    addWaypoint: `/drone_${id}_${BASE_TOPICS.addWaypoint}`,
+    removeWaypoint: `/drone_${id}_${BASE_TOPICS.removeWaypoint}`,
+    clearWaypoints: `/drone_${id}_${BASE_TOPICS.clearWaypoints}`,
+    saveWaypoints: `/drone_${id}_${BASE_TOPICS.saveWaypoints}`,
+    loadWaypoints: `/drone_${id}_${BASE_TOPICS.loadWaypoints}`,
+    deleteProject: `/drone_${id}_${BASE_TOPICS.deleteProject}`,
+    reorderWaypoints: `/drone_${id}_${BASE_TOPICS.reorderWaypoints}`,
+    waypointMarkers: `/drone_${id}_${BASE_TOPICS.waypointMarkers}`,
+    waypointProjectList: `/drone_${id}_${BASE_TOPICS.waypointProjectList}`,
   };
 }
 
@@ -64,6 +93,13 @@ export function extractDroneIdFromTopic(topic: string): string | undefined {
   const match = /^\/drone_(\d+)_/.exec(topic);
   return match?.[1];
 }
+
+// ---------------------------------------------------------------------------
+// Telemetry topics (battery, GPS, etc.)
+// ---------------------------------------------------------------------------
+export const TELEMETRY_TOPICS = {
+  battery: "/mavros/battery",
+} as const;
 
 // ---------------------------------------------------------------------------
 // Control topic & command codes
@@ -86,17 +122,6 @@ const PUBLISH_TOPICS = {
   goalWithId: "/goal_with_id",
   clickedPoint: "/clicked_point",
   initialPose: "/initialpose",
-} as const;
-
-// ---------------------------------------------------------------------------
-// Project management topics (waypoint save/load/delete/reorder)
-// ---------------------------------------------------------------------------
-export const PROJECT_TOPICS = {
-  saveWaypoints: "/save_waypoints",
-  loadWaypoints: "/load_waypoints",
-  deleteProject: "/delete_waypoint_project",
-  reorderWaypoints: "/reorder_waypoints",
-  projectList: "/waypoint_project_list",
 } as const;
 
 // ---------------------------------------------------------------------------

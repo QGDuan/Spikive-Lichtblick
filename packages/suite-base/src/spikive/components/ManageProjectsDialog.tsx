@@ -20,21 +20,20 @@ import {
 } from "@mui/material";
 import { useCallback, useState } from "react";
 
-import { useWaypointStore } from "@lichtblick/suite-base/spikive/stores/useWaypointStore";
-
 type ManageProjectsDialogProps = {
   open: boolean;
   onClose: () => void;
   onDelete: (names: string) => void;
+  projectList: string[];
 };
 
 export function ManageProjectsDialog({
   open,
   onClose,
   onDelete,
+  projectList,
 }: ManageProjectsDialogProps): React.JSX.Element {
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const projectList = useWaypointStore((s) => s.projectList);
 
   const handleToggle = useCallback((name: string) => {
     setSelected((prev) => {

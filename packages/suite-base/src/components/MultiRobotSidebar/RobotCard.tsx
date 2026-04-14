@@ -22,6 +22,8 @@ import {
 } from "@mui/material";
 import { useCallback, useState } from "react";
 
+import { BatteryIndicator } from "@lichtblick/suite-base/spikive/components/DroneStatusIndicators";
+
 import { useStyles } from "./RobotCard.style";
 import { ConnectionStatus, RobotEntry } from "./types";
 
@@ -132,6 +134,7 @@ export function RobotCard({
             </IconButton>
           </span>
         </Tooltip>
+        <BatteryIndicator />
         <Box sx={{ flex: 1 }} />
         <Tooltip title="Remove robot">
           <IconButton className={classes.actionButton} onClick={handleRemoveClick} size="small">

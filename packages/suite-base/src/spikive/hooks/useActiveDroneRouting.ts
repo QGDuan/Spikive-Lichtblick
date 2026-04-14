@@ -21,6 +21,7 @@ const TOPIC_FIELDS: (keyof DroneTopics)[] = [
   "goalPoint",
   "robotModel",
   "path",
+  "waypointMarkers",
 ];
 
 /** Fields that should NOT be pickable (everything except robotModel). */
@@ -29,6 +30,7 @@ const NON_PICKABLE_FIELDS: ReadonlySet<keyof DroneTopics> = new Set([
   "optimalTrajectory",
   "goalPoint",
   "path",
+  "waypointMarkers",
 ]);
 
 /**

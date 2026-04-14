@@ -91,7 +91,7 @@ export const defaultLayout: LayoutData =
             lineWidth: 0.05,
             gradient: ["#4fc3f7", "rgba(79, 195, 247, 0.8)"],
           },
-          "/waypoint_markers": {
+          [TOPIC_CONFIG.subscribe.waypointMarkers]: {
             visible: true,
             pickable: false,
           },

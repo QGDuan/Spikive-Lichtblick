@@ -29,25 +29,21 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { makeStyles } from "tss-react/mui";
 
 import { MessageDefinition } from "@lichtblick/message-definition";
 import { ros1 } from "@lichtblick/rosmsg-msgs-common";
+import { droneTopics } from "@lichtblick/suite-base/spikive/config/topicConfig";
 import {
   applyZ,
   ZMode,
   useWaypointStore,
 } from "@lichtblick/suite-base/spikive/stores/useWaypointStore";
-import { DEFAULT_DRONE_ID, PROJECT_TOPICS } from "@lichtblick/suite-base/spikive/config/topicConfig";
 
-import { SaveProjectDialog } from "./SaveProjectDialog";
 import { LoadProjectDialog } from "./LoadProjectDialog";
 import { ManageProjectsDialog } from "./ManageProjectsDialog";
-
-const POSE_TOPIC = "/add_waypoint";
-const REMOVE_TOPIC = "/remove_waypoint";
-const CLEAR_TOPIC = "/clear_waypoints";
+import { SaveProjectDialog } from "./SaveProjectDialog";
 
 /** Minimal datatypes required for geometry_msgs/PoseStamped over ROS1. */
 const PoseStampedDatatypes = new Map<string, MessageDefinition>(
@@ -230,49 +226,53 @@ export function WaypointPanel({
   const [dragIndex, setDragIndex] = useState<number | undefined>(undefined);
   const [dropTarget, setDropTarget] = useState<{ index: number; position: "above" | "below" } | undefined>(undefined);
 
+  // Build per-drone topic names
+  const topics = useMemo(() => droneTopics(droneId), [droneId]);
+
   // Read latest odom position from the store (pushed by ThreeDeeRender)
   const pos = useWaypointStore((s) => s.latestOdom[droneId]);
 
-  // Waypoint list comes from /waypoint_markers which is global (not drone-prefixed),
-  // so always read from DEFAULT_DRONE_ID regardless of which drone is active.
-  const waypointList = useWaypointStore((s) => s.tables[DEFAULT_DRONE_ID]?.waypoints ?? []);
+  // Waypoint list is per-drone (keyed by droneId)
+  const waypointList = useWaypointStore((s) => s.tables[droneId]?.waypoints ?? []);
+
+  // Project list is per-drone
+  const projectList = useWaypointStore((s) => s.projectLists[droneId] ?? []);
 
   // Z-settings are per active drone
   const droneState = useWaypointStore((s) => s.tables[droneId]);
   const updateZSettings = useWaypointStore((s) => s.updateZSettings);
   const getOrCreate = useWaypointStore((s) => s.getOrCreate);
 
-  // Ensure both the drone table and the global waypoint table exist
+  // Ensure the drone table exists
   useEffect(() => {
     getOrCreate(droneId);
-    getOrCreate(DEFAULT_DRONE_ID);
   }, [droneId, getOrCreate]);
 
-  // Advertise topics on mount
+  // Advertise per-drone topics on mount / droneId change
   const advertised = useRef(false);
   useEffect(() => {
     if (!advertise) {
       return;
     }
-    advertise(POSE_TOPIC, "geometry_msgs/PoseStamped", { datatypes: PoseStampedDatatypes });
-    advertise(REMOVE_TOPIC, "std_msgs/Int32", { datatypes: Int32Datatypes });
-    advertise(CLEAR_TOPIC, "std_msgs/Empty", { datatypes: EmptyDatatypes });
-    advertise(PROJECT_TOPICS.saveWaypoints, "std_msgs/String", { datatypes: StringDatatypes });
-    advertise(PROJECT_TOPICS.loadWaypoints, "std_msgs/String", { datatypes: StringDatatypes });
-    advertise(PROJECT_TOPICS.deleteProject, "std_msgs/String", { datatypes: StringDatatypes });
-    advertise(PROJECT_TOPICS.reorderWaypoints, "std_msgs/String", { datatypes: StringDatatypes });
+    advertise(topics.addWaypoint, "geometry_msgs/PoseStamped", { datatypes: PoseStampedDatatypes });
+    advertise(topics.removeWaypoint, "std_msgs/Int32", { datatypes: Int32Datatypes });
+    advertise(topics.clearWaypoints, "std_msgs/Empty", { datatypes: EmptyDatatypes });
+    advertise(topics.saveWaypoints, "std_msgs/String", { datatypes: StringDatatypes });
+    advertise(topics.loadWaypoints, "std_msgs/String", { datatypes: StringDatatypes });
+    advertise(topics.deleteProject, "std_msgs/String", { datatypes: StringDatatypes });
+    advertise(topics.reorderWaypoints, "std_msgs/String", { datatypes: StringDatatypes });
     advertised.current = true;
     return () => {
-      unadvertise?.(POSE_TOPIC);
-      unadvertise?.(REMOVE_TOPIC);
-      unadvertise?.(CLEAR_TOPIC);
-      unadvertise?.(PROJECT_TOPICS.saveWaypoints);
-      unadvertise?.(PROJECT_TOPICS.loadWaypoints);
-      unadvertise?.(PROJECT_TOPICS.deleteProject);
-      unadvertise?.(PROJECT_TOPICS.reorderWaypoints);
+      unadvertise?.(topics.addWaypoint);
+      unadvertise?.(topics.removeWaypoint);
+      unadvertise?.(topics.clearWaypoints);
+      unadvertise?.(topics.saveWaypoints);
+      unadvertise?.(topics.loadWaypoints);
+      unadvertise?.(topics.deleteProject);
+      unadvertise?.(topics.reorderWaypoints);
       advertised.current = false;
     };
-  }, [advertise, unadvertise]);
+  }, [advertise, unadvertise, topics]);
 
   const state = droneState ?? {
     waypoints: [],
@@ -289,32 +289,32 @@ export function WaypointPanel({
     }
     const adjustedZ = applyZ(pos.z, state);
     const time = { sec: Math.floor(Date.now() / 1000), nsec: 0 };
-    publish(POSE_TOPIC, {
+    publish(topics.addWaypoint, {
       header: { stamp: time, frame_id: "world" },
       pose: {
         position: { x: pos.x, y: pos.y, z: adjustedZ },
         orientation: { x: 0, y: 0, z: 0, w: 1 },
       },
     });
-  }, [pos, publish, state]);
+  }, [pos, publish, state, topics]);
 
   const handleRemove = useCallback(
     (idx: number) => {
       if (!publish || !advertised.current) {
         return;
       }
-      publish(REMOVE_TOPIC, { data: idx });
+      publish(topics.removeWaypoint, { data: idx });
     },
-    [publish],
+    [publish, topics],
   );
 
   const handleClearConfirm = useCallback(() => {
     if (!publish || !advertised.current) {
       return;
     }
-    publish(CLEAR_TOPIC, {});
+    publish(topics.clearWaypoints, {});
     setClearDialogOpen(false);
-  }, [publish]);
+  }, [publish, topics]);
 
   const handleZModeChange = useCallback(
     (_e: React.ChangeEvent<HTMLInputElement>, value: string) => {
@@ -341,9 +341,9 @@ export function WaypointPanel({
       if (!publish || !advertised.current) {
         return;
       }
-      publish(PROJECT_TOPICS.saveWaypoints, { data: name });
+      publish(topics.saveWaypoints, { data: name });
     },
-    [publish],
+    [publish, topics],
   );
 
   const handleLoad = useCallback(
@@ -351,9 +351,9 @@ export function WaypointPanel({
       if (!publish || !advertised.current) {
         return;
       }
-      publish(PROJECT_TOPICS.loadWaypoints, { data: name });
+      publish(topics.loadWaypoints, { data: name });
     },
-    [publish],
+    [publish, topics],
   );
 
   const handleDeleteProject = useCallback(
@@ -361,18 +361,18 @@ export function WaypointPanel({
       if (!publish || !advertised.current) {
         return;
       }
-      publish(PROJECT_TOPICS.deleteProject, { data: names });
+      publish(topics.deleteProject, { data: names });
     },
-    [publish],
+    [publish, topics],
   );
 
   const handleNewRouteConfirm = useCallback(() => {
     if (!publish || !advertised.current) {
       return;
     }
-    publish(CLEAR_TOPIC, {});
+    publish(topics.clearWaypoints, {});
     setNewRouteDialogOpen(false);
-  }, [publish]);
+  }, [publish, topics]);
 
   // ------------------------------------------------------------------
   // Handlers — native HTML5 drag reorder
@@ -408,14 +408,14 @@ export function WaypointPanel({
       const [moved] = indices.splice(fromIdx, 1);
       indices.splice(toIdx, 0, moved!);
       const order = indices.map((origIdx) => waypointList[origIdx]!.idx);
-      publish(PROJECT_TOPICS.reorderWaypoints, {
+      publish(topics.reorderWaypoints, {
         data: JSON.stringify({ order }),
       });
     }
 
     setDragIndex(undefined);
     setDropTarget(undefined);
-  }, [dragIndex, dropTarget, publish, waypointList]);
+  }, [dragIndex, dropTarget, publish, waypointList, topics]);
 
   const handleDragEnd = useCallback(() => {
     setDragIndex(undefined);
@@ -610,16 +610,19 @@ export function WaypointPanel({
         open={saveDialogOpen}
         onClose={() => { setSaveDialogOpen(false); }}
         onSave={handleSave}
+        projectList={projectList}
       />
       <LoadProjectDialog
         open={loadDialogOpen}
         onClose={() => { setLoadDialogOpen(false); }}
         onLoad={handleLoad}
+        projectList={projectList}
       />
       <ManageProjectsDialog
         open={manageDialogOpen}
         onClose={() => { setManageDialogOpen(false); }}
         onDelete={handleDeleteProject}
+        projectList={projectList}
       />
     </div>
   );

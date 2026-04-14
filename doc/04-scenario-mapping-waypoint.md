@@ -28,9 +28,10 @@
 3. 用户点击机器人模型 → 弹出 WaypointPanel（而非 DroneControlPanel）
 4. WaypointPanel 实时显示该无人机的 odom 位置 (x, y, z)
 5. 用户点击 "Record" 将当前位置录入航点列表，可选 Z 轴调整
-6. 航点列表变化时自动发布 MarkerArray 到 `/waypoint_markers`，3D 面板渲染球体 + 编号 + 连线
+6. 航点列表变化时自动发布 MarkerArray 到 `/drone_{id}_waypoint_markers`（每架无人机独立 topic），3D 面板渲染球体 + 编号 + 连线
 7. 用户可通过拖拽调整航点顺序，通过 Save/Load/Manage 管理航点项目集
-8. 项目保存/加载/删除通过 ROS topic 与后端 waypoint_manager 通信
+8. 所有航点操作 topic 均为每机独立: `/drone_{id}_save_waypoints`、`/drone_{id}_load_waypoints` 等，WaypointPanel 通过 `droneTopics(droneId)` 动态构建 topic 名称
+9. `useActiveDroneRouting` 在切换无人机时自动重映射 `waypointMarkers` topic
 
 ---
 
@@ -91,10 +92,11 @@
 │                     └── LINE_STRIP (紫色连线 #9C27B0, ≥2点)             │
 │                              │                                           │
 │                              ▼                                           │
-│                    publish("/waypoint_markers", MarkerArray)             │
+│                    publish("/drone_{id}_waypoint_markers", MarkerArray)   │
 │                              │                                           │
 │                              ▼                                           │
 │                    ThreeDeeRender 颜色覆盖拦截                            │
+│                    正则: /^\/drone_\d+_waypoint_markers$/                 │
 │                    (SPHERE→橙, TEXT→白, LINE→紫)                         │
 │                              │                                           │
 │                              ▼                                           │
@@ -102,16 +104,21 @@
 │                     ● ── ● ── ● ── ●  (航点球体 + 连线)                  │
 │                     1    2    3    4   (编号标签)                         │
 │                                                                          │
-│  ┌─────────── 项目管理路径 ──────────────────────────┐                   │
-│  │                                                    │                   │
-│  │  [Save] → publish /save_waypoints                  │                   │
-│  │  [Load] → publish /load_waypoints                  │                   │
-│  │  [Manage/Delete] → publish /delete_waypoint_project│                   │
-│  │  [拖拽排序] → publish /reorder_waypoints            │                   │
-│  │                                                    │                   │
-│  │  后端 → /waypoint_project_list → ThreeDeeRender    │                   │
-│  │  → setProjectList() → Dialog 展示可用项目列表       │                   │
-│  └────────────────────────────────────────────────────┘                   │
+│  ┌─────────── 项目管理路径 (per-drone topics) ────────────────────┐       │
+│  │                                                                 │       │
+│  │  WaypointPanel 使用 droneTopics(droneId) 构建 topic 名          │       │
+│  │                                                                 │       │
+│  │  [Save]    → publish /drone_{id}_save_waypoints                │       │
+│  │  [Load]    → publish /drone_{id}_load_waypoints                │       │
+│  │  [Delete]  → publish /drone_{id}_delete_waypoint_project       │       │
+│  │  [Reorder] → publish /drone_{id}_reorder_waypoints             │       │
+│  │                                                                 │       │
+│  │  后端 → /drone_{id}_waypoint_project_list                      │       │
+│  │  → ThreeDeeRender 正则拦截                                      │       │
+│  │  → setProjectList(droneId, list) → Dialog 展示可用项目列表      │       │
+│  │                                                                 │       │
+│  │  useActiveDroneRouting 在切换无人机时重映射 waypointMarkers     │       │
+│  └─────────────────────────────────────────────────────────────────┘       │
 │                                                                          │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
@@ -209,6 +216,13 @@
 │  │  "2": { x: -0.5, y: 2.1, z: 1.3 }              │    │
 │  └─────────────────────────────────────────────────┘    │
 │                                                         │
+│  projectLists: Record<droneId, string[]>                │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │  "1": ["route_A", "route_B", "test_1"]          │    │
+│  │  "2": ["patrol_1", "patrol_2"]                  │    │
+│  └─────────────────────────────────────────────────┘    │
+│  (每架无人机独立维护项目列表, setProjectList(droneId, list))│
+│                                                         │
 └─────────────────────────────────────────────────────────┘
 
                     状态转换图
@@ -260,8 +274,13 @@
   │  → addWaypoint()                 │    .waypoints (航点列表)    │
   │  → removeWaypoint()              │  → tables[droneId]         │
   │  → deleteLast()                  │    .zMode (Z 轴模式)       │
-  │  → clearWaypoints()              │                            │
-  │  → updateZSettings()             │                            │
+  │  → clearWaypoints()              │  → projectLists[droneId]   │
+  │  → updateZSettings()             │    (项目列表供 Dialog 使用)  │
+  │                                  │                            │
+  │  ThreeDeeRender (project_list    │                            │
+  │    正则拦截 /drone_\d+_waypoint_  │                            │
+  │    project_list)                 │                            │
+  │  → setProjectList(droneId, list) │                            │
   └──────────────────────────────────┴────────────────────────────┘
 ```
 
@@ -326,13 +345,15 @@ WaypointPanel UI 布局:
   ┌───────────────────────────────────────────────────────────────┐
   │   React mount                                                 │
   │                                                               │
+  │   topics = droneTopics(droneId)  // 动态构建 per-drone topic  │
+  │                                                               │
   │   useEffect:                                                  │
-  │     advertise("/waypoint_markers",                            │
+  │     advertise(topics.waypointMarkers,                         │
   │       "visualization_msgs/MarkerArray")                       │
-  │     advertise("/save_waypoints", "std_msgs/String")           │
-  │     advertise("/load_waypoints", "std_msgs/String")           │
-  │     advertise("/delete_waypoint_project", "std_msgs/String")  │
-  │     advertise("/reorder_waypoints", "std_msgs/String")        │
+  │     advertise(topics.saveWaypoints, "std_msgs/String")        │
+  │     advertise(topics.loadWaypoints, "std_msgs/String")        │
+  │     advertise(topics.deleteWaypointProject, "std_msgs/String")│
+  │     advertise(topics.reorderWaypoints, "std_msgs/String")     │
   │                                                               │
   │   getOrCreate(droneId)                                        │
   │   → 初始化该无人机的航点状态                                     │
@@ -351,21 +372,21 @@ WaypointPanel UI 布局:
   │   addWaypoint()  SaveProject  LoadProject  confirm  Manage   confirm│
   │   + applyZ()     Dialog       Dialog       clear    Projects clear  │
   │   + marker       → publish    → publish    dialog   Dialog   all   │
-  │     rebuild      /save_       /load_       + clear  → publish       │
-  │                  waypoints    waypoints    waypoints /delete_        │
-  │                                                     waypoint_       │
+  │     rebuild      /drone_{id}_ /drone_{id}_ + clear  → publish       │
+  │                  save_        load_        waypoints /drone_{id}_    │
+  │                  waypoints    waypoints             delete_waypoint_ │
   │                                                     project         │
   │                                                                      │
   │  ┌──────────────────────────────────────────────────────────────┐   │
   │  │  拖拽排序 (DraggableWaypointRow)                              │   │
   │  │  onDragStart → onDragOver → onDrop                           │   │
-  │  │  → 本地重排 + publish /reorder_waypoints                      │   │
+  │  │  → 本地重排 + publish /drone_{id}_reorder_waypoints          │   │
   │  └──────────────────────────────────────────────────────────────┘   │
   │                                                                      │
   │        ┌───────────────────────────────────────┐                    │
   │        │  useEffect: waypoints 变化              │                    │
   │        │  → makeWaypointMarkerArray()            │                    │
-  │        │  → publish("/waypoint_markers", array)  │                    │
+  │        │  → publish("/drone_{id}_waypoint_markers", array) │          │
   │        │  → 3D Panel 渲染更新                     │                    │
   │        └───────────────────────────────────────┘                    │
   └──────────────────────────────────────────────────────────────────────┘
@@ -375,11 +396,12 @@ WaypointPanel UI 布局:
   ┌───────────────────────────────────────────────────────────────┐
   │   React unmount                                               │
   │                                                               │
-  │   unadvertise("/waypoint_markers")                            │
-  │   unadvertise("/save_waypoints")                              │
-  │   unadvertise("/load_waypoints")                              │
-  │   unadvertise("/delete_waypoint_project")                     │
-  │   unadvertise("/reorder_waypoints")                           │
+  │   topics = droneTopics(droneId)                               │
+  │   unadvertise(topics.waypointMarkers)                         │
+  │   unadvertise(topics.saveWaypoints)                           │
+  │   unadvertise(topics.loadWaypoints)                           │
+  │   unadvertise(topics.deleteWaypointProject)                   │
+  │   unadvertise(topics.reorderWaypoints)                        │
   └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -413,9 +435,9 @@ WaypointPanel UI 布局:
 
 ### 发布生命周期
 
-1. **mount**: `advertise("/waypoint_markers", "visualization_msgs/MarkerArray", { datatypes: WaypointMarkerDatatypes })`
+1. **mount**: `advertise("/drone_{id}_waypoint_markers", "visualization_msgs/MarkerArray", { datatypes: WaypointMarkerDatatypes })`
 2. **waypoints 变化**: 完整重建 MarkerArray (DELETEALL + 新标记)，`publish()` 全量更新
-3. **unmount**: `unadvertise("/waypoint_markers")`
+3. **unmount**: `unadvertise("/drone_{id}_waypoint_markers")`
 
 ---
 
@@ -455,13 +477,15 @@ WaypointPanel UI 布局:
 
 ### 项目管理 Topic 配置 (PROJECT_TOPICS)
 
+所有项目管理 topic 均为每机独立，WaypointPanel 通过 `droneTopics(droneId)` 动态构建 topic 名称：
+
 | Topic | 方向 | 消息类型 | 用途 |
 | --- | --- | --- | --- |
-| `/save_waypoints` | 前端 → 后端 | std_msgs/String | 保存当前航点到指定项目名 |
-| `/load_waypoints` | 前端 → 后端 | std_msgs/String | 加载指定项目的航点数据 |
-| `/delete_waypoint_project` | 前端 → 后端 | std_msgs/String | 删除一个或多个项目 (逗号分隔) |
-| `/reorder_waypoints` | 前端 → 后端 | std_msgs/String | 重排航点顺序 (JSON: `{"order":[...]}`) |
-| `/waypoint_project_list` | 后端 → 前端 | std_msgs/String | 推送可用项目列表 (JSON: `{"projects":[...]}`) |
+| `/drone_{id}_save_waypoints` | 前端 → 后端 | std_msgs/String | 保存当前航点到指定项目名 |
+| `/drone_{id}_load_waypoints` | 前端 → 后端 | std_msgs/String | 加载指定项目的航点数据 |
+| `/drone_{id}_delete_waypoint_project` | 前端 → 后端 | std_msgs/String | 删除一个或多个项目 (逗号分隔) |
+| `/drone_{id}_reorder_waypoints` | 前端 → 后端 | std_msgs/String | 重排航点顺序 (JSON: `{"order":[...]}`) |
+| `/drone_{id}_waypoint_project_list` | 后端 → 前端 | std_msgs/String | 推送可用项目列表 (JSON: `{"projects":[...]}`) |
 
 ### 三个 Dialog 组件
 
@@ -487,13 +511,15 @@ WaypointPanel UI 布局:
 │           ▼                       ▼                        ▼             │
 │   onSave(name)             onLoad(name)           onDelete(names)       │
 │   → publish                → publish              → publish             │
-│   /save_waypoints          /load_waypoints         /delete_waypoint_     │
-│   { data: "route_A" }     { data: "route_A" }     project               │
+│   /drone_{id}_             /drone_{id}_           /drone_{id}_          │
+│   save_waypoints           load_waypoints         delete_waypoint_      │
+│   { data: "route_A" }     { data: "route_A" }     project              │
 │                                                    { data: "r1,r2" }    │
 │                                                                          │
 │  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │              数据源: useWaypointStore.projectList                   │ │
-│  │              更新者: ThreeDeeRender 拦截 /waypoint_project_list     │ │
+│  │  数据源: useWaypointStore.projectLists[droneId]                    │ │
+│  │  Dialog 接收 projectList 作为 prop (从 WaypointPanel 传入)         │ │
+│  │  更新者: ThreeDeeRender 正则拦截 /drone_\d+_waypoint_project_list  │ │
 │  └────────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
@@ -501,21 +527,23 @@ WaypointPanel UI 布局:
 ### 项目列表同步流程（图 19）
 
 ```text
-  后端 waypoint_manager
-  publish → /waypoint_project_list
+  后端 waypoint_manager (per-drone instance)
+  publish → /drone_{id}_waypoint_project_list
   payload: { "projects": ["route_A", "route_B", "test_1"] }
                     │
                     ▼ Foxglove Bridge WebSocket
                     │
                     ▼ ThreeDeeRender.tsx 消息处理循环
                     │
-                    │  if (topic === PROJECT_TOPICS.projectList) {
+                    │  正则匹配: /^\/drone_\d+_waypoint_project_list$/
+                    │  提取 droneId: extractDroneIdFromTopic(topic)
+                    │  {
                     │    payload = JSON.parse(message.data)
-                    │    setProjectList(payload.projects ?? [])
+                    │    setProjectList(droneId, payload.projects ?? [])
                     │    continue;  // 不传递给 Renderer
                     │  }
                     │
-                    ▼ useWaypointStore.projectList
+                    ▼ useWaypointStore.projectLists[droneId]
                     │  = ["route_A", "route_B", "test_1"]
                     │
           ┌─────────┼─────────────────┐
@@ -565,7 +593,7 @@ WaypointPanel UI 布局:
 │     ├── 计算新顺序: [#2, #3, #1] (原 idx: [2, 3, 1])             │
 │     ├── 本地 store: 重排 waypoints 数组 + 重新编号                 │
 │     └── 远程同步:                                                 │
-│         publish("/reorder_waypoints",                            │
+│         publish("/drone_{id}_reorder_waypoints",                 │
 │           { data: '{"order": [2, 3, 1]}' })                     │
 │                                                                  │
 │  4. onDragEnd()                                                  │
@@ -606,13 +634,16 @@ export const WAYPOINT_COLORS = {
 ### 拦截流程（图 21）
 
 ```text
-  /waypoint_markers 消息到达 ThreeDeeRender
+  /drone_{id}_waypoint_markers 消息到达 ThreeDeeRender
               │
               ▼
   ┌───────────────────────────────────────────────────────────────┐
   │  消息处理循环: for (const message of currentFrameMessages)     │
   │                                                               │
-  │  if (message.topic === "/waypoint_markers") {                 │
+  │  正则匹配: /^\/drone_\d+_waypoint_markers$/                   │
+  │  提取 droneId: extractDroneIdFromTopic(message.topic)         │
+  │                                                               │
+  │  if (match) {                                                 │
   │    │                                                          │
   │    │  遍历 markers 数组:                                       │
   │    │                                                          │
@@ -646,9 +677,11 @@ export const WAYPOINT_COLORS = {
   │    │                                                          │
   │    │  解析完成后:                                               │
   │    │  setWaypointsFromMarkers(droneId, parsedWaypoints)       │
-  │    │  → 同步 store 中的航点列表 (保持前端与后端一致)             │
+  │    │  → 同步 store 中该无人机的航点列表 (保持前端与后端一致)     │
   │    │                                                          │
   │    │  *** 不 continue — 颜色覆盖后的消息继续传递给 Renderer *** │
+  │    │  订阅由 config routing 自动管理 (useActiveDroneRouting    │
+  │    │  在切换无人机时重映射 waypointMarkers topic)               │
   │    │                                                          │
   │  }                                                            │
   └───────────────────────────────────────────────────────────────┘
@@ -660,20 +693,22 @@ export const WAYPOINT_COLORS = {
 
 | 功能 | waypoint_recorder.py (Python) | WaypointPanel.tsx (TypeScript) |
 | --- | --- | --- |
+| Drone ID 来源 | `~drone_id` (private param) | `droneTopics(droneId)` 动态构建 |
+| 多机部署 | 每架无人机独立实例: `rosrun ... _drone_id:=N` | 单实例前端, `droneTopics(droneId)` 动态路由 |
 | Odom 订阅 | `rospy.Subscriber("odom", Odometry)` | ThreeDeeRender 消息循环拦截 |
 | 航点录制 | `_record_waypoint()` 按钮回调 | `addWaypoint()` Store action |
 | Z 轴调整 | `z_value = override_z if use_override else raw_z + z_offset` | `applyZ(actualZ, state)` |
 | Z 模式 | Override / Offset 两种 | none / override / offset 三种 |
 | 删除航点 | 按 index 删除 + 重编号 | `removeWaypoint(droneId, idx)` + 重编号 |
 | 清空航点 | `_clear_waypoints()` | `clearWaypoints(droneId)` |
-| 拖拽排序 | **不支持** | HTML5 D&D + `/reorder_waypoints` publish |
-| 可视化 | `MarkerArray` → `/waypoint_markers` | `makeWaypointMarkerArray()` → `/waypoint_markers` |
+| 拖拽排序 | **不支持** | HTML5 D&D + `/drone_{id}_reorder_waypoints` publish |
+| 可视化 | `MarkerArray` → `/drone_{id}_waypoint_markers` | `makeWaypointMarkerArray()` → `/drone_{id}_waypoint_markers` |
 | 球体颜色 | 红色 (1,0,0) | **Spikive 橙 #EF833A** (前端覆盖) |
 | 文字颜色 | 白色 (1,1,1) | **白色** (前端覆盖) |
 | 连线颜色 | 绿色 (0,1,0) | **紫色 #9C27B0** (前端覆盖) |
-| 项目保存 | **不支持** | SaveProjectDialog → `/save_waypoints` |
-| 项目加载 | **不支持** | LoadProjectDialog → `/load_waypoints` |
-| 项目管理 | **不支持** | ManageProjectsDialog → `/delete_waypoint_project` |
+| 项目保存 | **不支持** | SaveProjectDialog → `/drone_{id}_save_waypoints` |
+| 项目加载 | **不支持** | LoadProjectDialog → `/drone_{id}_load_waypoints` |
+| 项目管理 | **不支持** | ManageProjectsDialog → `/drone_{id}_delete_waypoint_project` |
 | 导航状态机 | NAV_IDLE → NAV_SENDING → NAV_WAITING → NAV_DONE | **尚未实现** |
 | 发送航点 | `_send_waypoint()` → GoalSet | **尚未实现** |
 | DroneState 监听 | `/drone_{id}_state` | **尚未实现** |
@@ -685,6 +720,7 @@ export const WAYPOINT_COLORS = {
 - **拖拽排序** — Python 版无此能力
 - **项目持久化** — 命名保存 / 加载 / 批量删除
 - **品牌色覆盖** — 统一的 Spikive 视觉标识
+- **单实例多机路由** — 前端使用 `droneTopics(droneId)` 动态构建 topic，无需为每架无人机启动独立实例
 
 仍待实现的 Python 版功能：
 
@@ -715,7 +751,7 @@ export const WAYPOINT_COLORS = {
 
 **设计**: useWaypointStore 使用 `tables: Record<droneId, DroneWaypointState>`，每架无人机的航点独立存储。切换选中的无人机时，WaypointPanel 自动显示对应无人机的航点列表。
 
-**注意**: `/waypoint_markers` 是全局 topic，不带 drone_id 前缀。当前 MarkerArray 只显示当前选中无人机的航点。
+**已解决**: 所有航点 topic 均已改为每机独立（`/drone_{id}_waypoint_markers`、`/drone_{id}_save_waypoints` 等）。`useActiveDroneRouting` 在切换无人机时自动重映射 `waypointMarkers` topic。WaypointPanel 使用 `droneTopics(droneId)` 动态构建所有 topic 名称，确保多机数据完全隔离。项目列表也已改为 `projectLists: Record<droneId, string[]>`，每架无人机独立维护。
 
 ---
 

@@ -48,7 +48,7 @@ export function applyZ(actualZ: number, state: DroneWaypointState): number {
 type WaypointStore = {
   tables: Record<string, DroneWaypointState>;
   latestOdom: Record<string, OdomPosition>;
-  projectList: string[];
+  projectLists: Record<string, string[]>;
 
   getOrCreate: (droneId: string) => DroneWaypointState;
   /** Replace the waypoint list for a drone (driven by backend /waypoint_markers). */
@@ -58,13 +58,13 @@ type WaypointStore = {
     settings: Partial<Pick<DroneWaypointState, "zMode" | "overrideZValue">>,
   ) => void;
   updateOdom: (droneId: string, pos: OdomPosition) => void;
-  setProjectList: (list: string[]) => void;
+  setProjectList: (droneId: string, list: string[]) => void;
 };
 
 export const useWaypointStore = create<WaypointStore>((set, get) => ({
   tables: {},
   latestOdom: {},
-  projectList: [],
+  projectLists: {},
 
   getOrCreate: (droneId: string): DroneWaypointState => {
     const existing = get().tables[droneId];
@@ -107,7 +107,7 @@ export const useWaypointStore = create<WaypointStore>((set, get) => ({
     set((s) => ({ latestOdom: { ...s.latestOdom, [droneId]: pos } }));
   },
 
-  setProjectList: (list: string[]) => {
-    set({ projectList: list });
+  setProjectList: (droneId: string, list: string[]) => {
+    set((s) => ({ projectLists: { ...s.projectLists, [droneId]: list } }));
   },
 }));

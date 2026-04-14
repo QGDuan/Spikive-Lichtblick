@@ -1,6 +1,6 @@
 # 05 API 参考手册
 
-> **注意**: 行号对应当前工作树状态 (2026-04-12)，后续提交可能导致行号偏移。
+> **注意**: 行号对应当前工作树状态 (2026-04-14)，后续提交可能导致行号偏移。
 
 ## 目录
 
@@ -24,7 +24,6 @@
 │  │  ┌──────────────────┐                                            │   │
 │  │  │  topicConfig.ts   │◄──────────────────────────────────────┐   │   │
 │  │  │  (核心配置)        │                                       │   │   │
-│  │  │  +PROJECT_TOPICS  │                                       │   │   │
 │  │  │  +WAYPOINT_COLORS │                                       │   │   │
 │  │  └──────────────────┘                                        │   │   │
 │  │           ▲  ▲  ▲                                            │   │   │
@@ -46,7 +45,7 @@
 │  │  │  ┌───────────────────┐  ┌──────────────────┐              │   │   │
 │  │  │  │ useSceneModeStore │  │ useWaypointStore │              │   │   │
 │  │  │  │ .ts               │  │ .ts              │              │   │   │
-│  │  │  └───────────────────┘  │ +projectList     │              │   │   │
+│  │  │  └───────────────────┘  │ +projectLists   │              │   │   │
 │  │  │           ▲              │ +setProjectList  │              │   │   │
 │  │  │           │              │ +setWaypoints... │              │   │   │
 │  │  │           │              └──────────────────┘              │   │   │
@@ -58,7 +57,7 @@
 │  │  │           │                │     │     │                  │   │   │
 │  │  │  ┌────────┴──────────┐  ┌─┴─────┴─────┴──────────┐      │   │   │
 │  │  │  │SceneSelection     │  │ WaypointPanel           │      │   │   │
-│  │  │  │Dialog.tsx         │  │ .tsx (627 行)            │      │   │   │
+│  │  │  │Dialog.tsx         │  │ .tsx (630 行)            │      │   │   │
 │  │  │  └───────────────────┘  │ ┌─────────────────────┐ │      │   │   │
 │  │  │                         │ │ SaveProjectDialog    │ │      │   │   │
 │  │  │                         │ │ LoadProjectDialog    │ │      │   │   │
@@ -96,7 +95,7 @@
 │  │ +ThemeToggle     │  │ +DroneControl  │  │ +odom 拦截       │  │   │
 │  │ +MultiRobotSidebar│  │ +WaypointPanel │  │ +GoalSet publish │  │   │
 │  └──────────────────┘  └────────────────┘  │ +颜色覆盖        │  │   │
-│                                             │ +projectList拦截 │  │   │
+│                                             │ +per-drone拦截   │  │   │
 │                                             └──────────────────┘  │   │
 │  ┌──────────────────┐  ┌────────────────┐  ┌──────────────────┐  │   │
 │  │ Renderer.ts       │  │ publish.ts     │  │ defaultLayout.ts │  │   │
@@ -115,34 +114,44 @@
 
 ### 2.1 topicConfig.ts
 
-**路径**: `packages/suite-base/src/spikive/config/topicConfig.ts` (110 行)
+**路径**: `packages/suite-base/src/spikive/config/topicConfig.ts` (144 行)
 
 **导出清单**:
 
 | 导出名 | 类型 | 说明 |
 | --- | --- | --- |
 | `DEFAULT_DRONE_ID` | `string` ("1") | 默认 drone_id |
-| `DroneTopics` | `type` | `{ pointCloud, optimalTrajectory, goalPoint, robotModel, path, odom }` |
-| `droneTopics(droneId: string)` | `function → DroneTopics` | 输入 drone_id，返回完整 topic 路径映射 |
-| `droneBodyFrame(droneId: string)` | `function → string` | 输入 drone_id，返回 TF 帧名 `"base{id}"` |
+| `DroneTopics` | `type` | 15 字段: `{ pointCloud, optimalTrajectory, goalPoint, robotModel, path, odom, addWaypoint, removeWaypoint, clearWaypoints, saveWaypoints, loadWaypoints, deleteProject, reorderWaypoints, waypointMarkers, waypointProjectList }` |
+| `droneTopics(droneId: string \| number)` | `function → DroneTopics` | 输入 drone_id，返回所有 15 个完整 topic 路径映射 (含 `/drone_{id}_` 前缀) |
+| `droneBodyFrame(droneId: string \| number)` | `function → string` | 输入 drone_id，返回 TF 帧名 `"base{id}"` |
 | `extractDroneIdFromTopic(topic: string)` | `function → string \| undefined` | 从 topic 路径提取 drone_id |
+| `TELEMETRY_TOPICS` | `object` | 遥测 topic: `{ battery: "/mavros/battery" }` |
 | `CONTROL_TOPIC` | `string` ("/control") | 飞行指令发布 topic |
 | `DRONE_COMMANDS` | `object` | `{ TAKEOFF: 1, LAND: 2, RETURN: 3, CONTINUE: 4, STOP: 5 }` |
 | `TOPIC_CONFIG` | `object` | 聚合配置: `{ subscribe, publish, followTf }` |
-| `PROJECT_TOPICS` | `object` | 项目管理 topic: `{ saveWaypoints, loadWaypoints, deleteProject, reorderWaypoints, projectList }` |
 | `WAYPOINT_COLORS` | `object` | 航点标记颜色: `{ sphere: #EF833A, text: white, line: #9C27B0 }` |
 
-**PROJECT_TOPICS 详细定义**:
+> **注意**: `PROJECT_TOPICS` 常量已移除。所有航点管理 topic (save/load/delete/reorder/markers/projectList) 现在通过 `droneTopics()` 生成 per-drone 前缀的 topic 名，不再使用全局常量。
 
-```typescript
-export const PROJECT_TOPICS = {
-  saveWaypoints:    "/save_waypoints",            // 保存航点项目
-  loadWaypoints:    "/load_waypoints",            // 加载航点项目
-  deleteProject:    "/delete_waypoint_project",   // 删除项目 (逗号分隔多个)
-  reorderWaypoints: "/reorder_waypoints",         // 重排航点 (JSON order)
-  projectList:      "/waypoint_project_list",     // 后端推送项目列表
-} as const;
-```
+**DroneTopics 15 字段说明**:
+
+| 字段 | 生成的 topic 格式 | 用途 |
+| --- | --- | --- |
+| `pointCloud` | `/drone_{id}_cloud_registered` | 点云订阅 |
+| `optimalTrajectory` | `/drone_{id}_ego_planner_node/optimal_list` | EGO-Planner 轨迹订阅 |
+| `goalPoint` | `/drone_{id}_ego_planner_node/goal_point` | 目标点订阅 |
+| `robotModel` | `/drone_{id}_odom_visualization/robot` | 机器人模型订阅 (pickable) |
+| `path` | `/drone_{id}_odom_visualization/path` | 路径订阅 |
+| `odom` | `/drone_{id}_visual_slam/odom` | 里程计订阅 |
+| `addWaypoint` | `/drone_{id}_add_waypoint` | 添加航点 (前端→后端) |
+| `removeWaypoint` | `/drone_{id}_remove_waypoint` | 删除航点 (前端→后端) |
+| `clearWaypoints` | `/drone_{id}_clear_waypoints` | 清空航点 (前端→后端) |
+| `saveWaypoints` | `/drone_{id}_save_waypoints` | 保存项目 (前端→后端) |
+| `loadWaypoints` | `/drone_{id}_load_waypoints` | 加载项目 (前端→后端) |
+| `deleteProject` | `/drone_{id}_delete_waypoint_project` | 删除项目 (前端→后端) |
+| `reorderWaypoints` | `/drone_{id}_reorder_waypoints` | 重排航点 (前端→后端) |
+| `waypointMarkers` | `/drone_{id}_waypoint_markers` | 航点可视化标记 (后端→前端) |
+| `waypointProjectList` | `/drone_{id}_waypoint_project_list` | 项目列表推送 (后端→前端) |
 
 **WAYPOINT_COLORS 详细定义**:
 
@@ -158,26 +167,35 @@ export const WAYPOINT_COLORS = {
 
 | 函数 | 被以下模块调用 |
 | --- | --- |
-| `droneTopics()` | `useActiveDroneRouting.ts`, `defaultLayout.ts` |
+| `droneTopics()` | `useActiveDroneRouting.ts`, `WaypointPanel.tsx`, `defaultLayout.ts` |
 | `droneBodyFrame()` | `useActiveDroneRouting.ts`, `defaultLayout.ts` |
 | `extractDroneIdFromTopic()` | `Interactions.tsx`, `ThreeDeeRender.tsx`, `DroneControlPanel.tsx` |
+| `TELEMETRY_TOPICS` | `ThreeDeeRender.tsx` |
 | `CONTROL_TOPIC` | `DroneControlPanel.tsx` |
 | `DRONE_COMMANDS` | `DroneControlPanel.tsx` |
 | `TOPIC_CONFIG` | `ThreeDeeRender.tsx`, `defaultLayout.ts` |
-| `PROJECT_TOPICS` | `WaypointPanel.tsx`, `ThreeDeeRender.tsx` |
 | `WAYPOINT_COLORS` | `ThreeDeeRender.tsx` |
 
 ---
 
 ### 2.2 useActiveDroneRouting.ts
 
-**路径**: `packages/suite-base/src/spikive/hooks/useActiveDroneRouting.ts` (207 行)
+**路径**: `packages/suite-base/src/spikive/hooks/useActiveDroneRouting.ts` (209 行)
 
 **导出**:
 
 | 导出名 | 类型 | 说明 |
 | --- | --- | --- |
 | `useActiveDroneRouting()` | `hook → void` | 监听活跃机器人变化，自动重写 3D Panel topic 订阅 |
+
+**内部常量**:
+
+| 常量 | 值 | 说明 |
+| --- | --- | --- |
+| `TOPIC_FIELDS` | `["pointCloud", "optimalTrajectory", "goalPoint", "robotModel", "path", "waypointMarkers"]` (6 项) | 所有参与路由重映射的 DroneTopics 字段，用于遍历 topic 对 |
+| `NON_PICKABLE_FIELDS` | `Set<"pointCloud", "optimalTrajectory", "goalPoint", "path", "waypointMarkers">` | 不参与 GPU pick 的 topic 字段 (仅 robotModel 为 pickable)，包含 `waypointMarkers` |
+
+> **变更**: `TOPIC_FIELDS` 从 5 项扩展为 6 项，新增 `waypointMarkers`。该字段同时在 `NON_PICKABLE_FIELDS` 中标记为不可 pick。
 
 **内部函数**:
 
@@ -226,7 +244,7 @@ export const WAYPOINT_COLORS = {
 
 ### 2.4 useWaypointStore.ts
 
-**路径**: `packages/suite-base/src/spikive/stores/useWaypointStore.ts` (176 行)
+**路径**: `packages/suite-base/src/spikive/stores/useWaypointStore.ts` (114 行)
 
 **导出**:
 
@@ -234,40 +252,40 @@ export const WAYPOINT_COLORS = {
 | --- | --- | --- |
 | `Waypoint` | `type` | `{ idx: number, x: number, y: number, z: number }` |
 | `OdomPosition` | `type` | `{ x: number, y: number, z: number }` |
-| `ZMode` | `type` | `"none" \| "override" \| "offset"` |
-| `DroneWaypointState` | `type` | `{ waypoints, zMode, overrideZValue, zOffsetValue }` |
+| `ZMode` | `type` | `"none" \| "override"` |
+| `DroneWaypointState` | `type` | `{ waypoints, zMode, overrideZValue }` |
+| `applyZ` | `function` | 根据 zMode 计算最终 Z 值 (导出供 WaypointPanel 使用) |
 | `useWaypointStore` | `Zustand Store` | 航点数据全局状态 |
 
 **State**:
 
 ```typescript
 {
-  tables: Record<string, DroneWaypointState>;  // droneId → 航点状态
-  latestOdom: Record<string, OdomPosition>;    // droneId → 最新 odom 位置
-  projectList: string[];                       // 可用项目名列表 (由后端推送)
+  tables: Record<string, DroneWaypointState>;          // droneId → 航点状态
+  latestOdom: Record<string, OdomPosition>;            // droneId → 最新 odom 位置
+  projectLists: Record<string, string[]>;              // droneId → 可用项目名列表 (由后端 per-drone 推送)
 }
 ```
+
+> **变更**: `projectList: string[]` 改为 `projectLists: Record<string, string[]>`，项目列表按 droneId 分区存储。
 
 **Actions**:
 
 | Action | 签名 | 说明 |
 | --- | --- | --- |
 | `getOrCreate` | `(droneId: string) → DroneWaypointState` | 获取或初始化该无人机的航点状态 |
-| `addWaypoint` | `(droneId: string, x: number, y: number, z: number) → void` | 添加航点 (自动 applyZ + 编号) |
-| `removeWaypoint` | `(droneId: string, idx: number) → void` | 按索引删除航点，重新编号 |
-| `deleteLast` | `(droneId: string) → void` | 删除最后一个航点 |
-| `updateZSettings` | `(droneId: string, settings: Partial<ZSettings>) → void` | 更新 Z 轴模式/值 |
-| `clearWaypoints` | `(droneId: string) → void` | 清空该无人机所有航点 |
+| `updateZSettings` | `(droneId: string, settings: Partial<...>) → void` | 更新 Z 轴模式/值 |
 | `updateOdom` | `(droneId: string, pos: OdomPosition) → void` | 更新最新 odom 位置 (高频) |
 | `setWaypointsFromMarkers` | `(droneId: string, waypoints: Waypoint[]) → void` | 从 marker 解析批量同步航点列表 |
-| `setProjectList` | `(list: string[]) → void` | 替换整个项目列表 (由 ThreeDeeRender 拦截消息后调用) |
+| `setProjectList` | `(droneId: string, list: string[]) → void` | 替换指定 drone 的项目列表 (由 ThreeDeeRender 拦截 per-drone 消息后调用) |
+
+> **变更**: `setProjectList` 签名从 `(list: string[]) → void` 改为 `(droneId: string, list: string[]) → void`，按 droneId 更新对应的项目列表。`addWaypoint`、`removeWaypoint`、`deleteLast`、`clearWaypoints` 等旧的本地操作 action 已移除 (航点操作现在由后端通过 per-drone topic 处理)。
 
 **内部函数**:
 
 | 函数 | 签名 | 说明 |
 | --- | --- | --- |
-| `defaultDroneState` | `() → DroneWaypointState` | 返回默认航点状态 (zMode="override", overrideZ=1.5) |
-| `applyZ` | `(actualZ: number, state: DroneWaypointState) → number` | 根据 zMode 计算最终 Z 值 |
+| `defaultDroneState` | `() → DroneWaypointState` | 返回默认航点状态 (zMode="none", overrideZ=1.5) |
 
 **写入者与读取者**:
 
@@ -275,8 +293,8 @@ export const WAYPOINT_COLORS = {
 | --- | --- | --- |
 | ThreeDeeRender (odom 拦截) | `updateOdom()` | WaypointPanel → `latestOdom[droneId]` |
 | ThreeDeeRender (marker 拦截) | `setWaypointsFromMarkers()` | WaypointPanel → `tables[droneId].waypoints` |
-| ThreeDeeRender (project list 拦截) | `setProjectList()` | SaveProjectDialog, LoadProjectDialog, ManageProjectsDialog |
-| WaypointPanel (用户操作) | `addWaypoint()`, `removeWaypoint()`, `clearWaypoints()` | WaypointPanel → 航点列表 |
+| ThreeDeeRender (project list 拦截) | `setProjectList()` | WaypointPanel → `projectLists[droneId]` → 传递给 Dialog 组件 |
+| WaypointPanel (Z 模式切换) | `updateZSettings()` | WaypointPanel → Z 设置 |
 
 ---
 
@@ -323,7 +341,7 @@ export const WAYPOINT_COLORS = {
 
 ### 2.7 WaypointPanel.tsx
 
-**路径**: `packages/suite-base/src/spikive/components/WaypointPanel.tsx` (627 行)
+**路径**: `packages/suite-base/src/spikive/components/WaypointPanel.tsx` (630 行)
 
 **Props**:
 
@@ -338,19 +356,29 @@ export const WAYPOINT_COLORS = {
 
 **关键行为**:
 
-- `useEffect(mount)`: advertise 5 个 topic:
-  - `/waypoint_markers` ("visualization_msgs/MarkerArray")
-  - `/save_waypoints` ("std_msgs/String")
-  - `/load_waypoints` ("std_msgs/String")
-  - `/delete_waypoint_project` ("std_msgs/String")
-  - `/reorder_waypoints` ("std_msgs/String")
-- `useEffect(waypoints change)`: `makeWaypointMarkerArray(waypoints, "world")` → `publish("/waypoint_markers", markerArray)`
-- `handleRecord()`: 读取 `latestOdom[droneId]` → `addWaypoint(droneId, x, y, z)`
-- `handleSave(name)`: `publish("/save_waypoints", { data: name })`
-- `handleLoad(name)`: `publish("/load_waypoints", { data: name })`
-- `handleDeleteProject(names)`: `publish("/delete_waypoint_project", { data: names })` (逗号分隔)
-- `handleDrop(src, tgt)`: 重排 waypoints + `publish("/reorder_waypoints", { data: JSON.stringify({order}) })`
-- `useEffect(unmount)`: unadvertise 全部 5 个 topic
+- `useMemo(() => droneTopics(droneId), [droneId])`: 根据 `droneId` 动态构建所有 per-drone topic 名 (无硬编码 topic 常量)
+- Store 读取使用实际 `droneId` 作为 key (非 `DEFAULT_DRONE_ID`):
+  - `latestOdom[droneId]` — 最新 odom 位置
+  - `tables[droneId]?.waypoints` — 当前航点列表
+  - `projectLists[droneId] ?? []` — 该 drone 的项目列表
+- `useEffect(mount / droneId change)`: advertise 7 个 per-drone topic (依赖 `topics`，droneId 变化时重新 advertise):
+  - `topics.addWaypoint` ("geometry_msgs/PoseStamped")
+  - `topics.removeWaypoint` ("std_msgs/Int32")
+  - `topics.clearWaypoints` ("std_msgs/Empty")
+  - `topics.saveWaypoints` ("std_msgs/String")
+  - `topics.loadWaypoints` ("std_msgs/String")
+  - `topics.deleteProject` ("std_msgs/String")
+  - `topics.reorderWaypoints` ("std_msgs/String")
+- `useEffect(unmount)`: unadvertise 全部 7 个 topic
+- `handleRecord()`: 读取 `latestOdom[droneId]` → `publish(topics.addWaypoint, PoseStamped)`
+- `handleRemove(idx)`: `publish(topics.removeWaypoint, { data: idx })`
+- `handleClearConfirm()`: `publish(topics.clearWaypoints, {})`
+- `handleSave(name)`: `publish(topics.saveWaypoints, { data: name })`
+- `handleLoad(name)`: `publish(topics.loadWaypoints, { data: name })`
+- `handleDeleteProject(names)`: `publish(topics.deleteProject, { data: names })` (逗号分隔)
+- `handleDrop(src, tgt)`: 重排 → `publish(topics.reorderWaypoints, { data: JSON.stringify({order}) })`
+
+> **变更**: 所有 topic 名从硬编码全局常量 (如 `/save_waypoints`) 改为 per-drone 动态构建 (如 `/drone_1_save_waypoints`)。Advertise effect 依赖 `topics` 对象，droneId 切换时自动重新 advertise。
 
 **内部子组件**:
 
@@ -360,11 +388,11 @@ export const WAYPOINT_COLORS = {
 
 **集成的 Dialog 组件**:
 
-| Dialog | 触发 | 回调 |
-| --- | --- | --- |
-| `SaveProjectDialog` | toolbar Save 按钮 | `onSave(name)` → handleSave |
-| `LoadProjectDialog` | toolbar Load 按钮 | `onLoad(name)` → handleLoad |
-| `ManageProjectsDialog` | toolbar Manage 按钮 | `onDelete(names)` → handleDeleteProject |
+| Dialog | 触发 | 传递 props | 回调 |
+| --- | --- | --- | --- |
+| `SaveProjectDialog` | toolbar Save 按钮 | `projectList={projectList}` | `onSave(name)` → handleSave |
+| `LoadProjectDialog` | toolbar Load 按钮 | `projectList={projectList}` | `onLoad(name)` → handleLoad |
+| `ManageProjectsDialog` | toolbar Manage 按钮 | `projectList={projectList}` | `onDelete(names)` → handleDeleteProject |
 
 **调用位置**: `Interactions.tsx` → `sceneMode === "mapping-waypoint"` 时渲染
 
@@ -372,7 +400,7 @@ export const WAYPOINT_COLORS = {
 
 ### 2.8 SaveProjectDialog.tsx
 
-**路径**: `packages/suite-base/src/spikive/components/SaveProjectDialog.tsx` (~100 行)
+**路径**: `packages/suite-base/src/spikive/components/SaveProjectDialog.tsx` (~120 行)
 
 **Props**:
 
@@ -381,24 +409,25 @@ export const WAYPOINT_COLORS = {
   open: boolean;
   onClose: () => void;
   onSave: (name: string) => void;
+  projectList: string[];        // 由 WaypointPanel 从 useWaypointStore.projectLists[droneId] 传入
 }
 ```
 
 **关键行为**:
 
-- MUI Autocomplete 输入框，已保存项目名作为建议列表
+- MUI Autocomplete 输入框，`projectList` 作为建议列表
 - 输入验证: `/^[a-zA-Z0-9]*$/` (仅字母数字)，非法字符实时错误提示
 - 空输入默认使用 `"waypoint"`
 - Enter 键提交 (无验证错误时)
 - 关闭时重置输入状态
 
-**数据依赖**: `useWaypointStore.projectList` (Autocomplete 建议列表)
+> **变更**: 不再直接访问 `useWaypointStore`，改为通过 `projectList: string[]` prop 接收数据。
 
 ---
 
 ### 2.9 LoadProjectDialog.tsx
 
-**路径**: `packages/suite-base/src/spikive/components/LoadProjectDialog.tsx` (~70 行)
+**路径**: `packages/suite-base/src/spikive/components/LoadProjectDialog.tsx` (~79 行)
 
 **Props**:
 
@@ -407,23 +436,24 @@ export const WAYPOINT_COLORS = {
   open: boolean;
   onClose: () => void;
   onLoad: (name: string) => void;
+  projectList: string[];        // 由 WaypointPanel 从 useWaypointStore.projectLists[droneId] 传入
 }
 ```
 
 **关键行为**:
 
-- MUI Select 下拉列表展示已保存项目
-- 空列表时显示 "No saved projects found"
+- MUI Select 下拉列表展示 `projectList` 中的已保存项目
+- 空列表时显示 "No saved projects found."
 - 未选择时 Load 按钮禁用
 - 关闭时重置选择状态
 
-**数据依赖**: `useWaypointStore.projectList`
+> **变更**: 不再直接访问 `useWaypointStore`，改为通过 `projectList: string[]` prop 接收数据。
 
 ---
 
 ### 2.10 ManageProjectsDialog.tsx
 
-**路径**: `packages/suite-base/src/spikive/components/ManageProjectsDialog.tsx` (~110 行)
+**路径**: `packages/suite-base/src/spikive/components/ManageProjectsDialog.tsx` (~140 行)
 
 **Props**:
 
@@ -432,19 +462,20 @@ export const WAYPOINT_COLORS = {
   open: boolean;
   onClose: () => void;
   onDelete: (names: string) => void;  // 逗号分隔的项目名
+  projectList: string[];              // 由 WaypointPanel 从 useWaypointStore.projectLists[droneId] 传入
 }
 ```
 
 **关键行为**:
 
-- MUI Checkbox List 多选界面
-- 每项右侧有快捷删除按钮 (🗑)，支持单项直接删除
+- MUI Checkbox List 多选界面，展示 `projectList` 中的项目
+- 每项右侧有快捷删除按钮，支持单项直接删除
 - 批量选择后显示 "Delete Selected (N)" 按钮
-- 空列表时显示 "No saved projects"
+- 空列表时显示 "No saved projects."
 - 关闭时清除选择状态
 - `onDelete` 回调传递逗号分隔的项目名字符串
 
-**数据依赖**: `useWaypointStore.projectList`
+> **变更**: 不再直接访问 `useWaypointStore`，改为通过 `projectList: string[]` prop 接收数据。
 
 ---
 
@@ -570,24 +601,29 @@ interface RobotEntry {
 
 ### 4.3 ThreeDeeRender.tsx
 
-**路径**: `packages/suite-base/src/panels/ThreeDeeRender/ThreeDeeRender.tsx`
+**路径**: `packages/suite-base/src/panels/ThreeDeeRender/ThreeDeeRender.tsx` (1188 行)
 
 | 新增/修改 | 位置 | 说明 |
 | --- | --- | --- |
-| import | L34 | `TOPIC_CONFIG, extractDroneIdFromTopic, PROJECT_TOPICS, WAYPOINT_COLORS` from topicConfig |
-| import | L35-36 | `useSceneModeStore`, `useWaypointStore` |
-| import | L50-57 | `GoalSetDatatypes, makeGoalSetMessage` from publish |
-| 读取 Store | L638-640 | `sceneMode`, `updateOdom`, `setProjectList`, `setWaypointsFromMarkers` |
-| 动态订阅 | L644-667 | mapping 模式下额外订阅 `/drone_\w+_visual_slam/odom` + `/waypoint_project_list` |
-| 消息拦截 (odom) | L730-745 | odom 消息正则匹配 → extractDroneIdFromTopic → updateOdom() |
-| 消息拦截 (markers) | L772-819 | `/waypoint_markers` 颜色覆盖 (SPHERE→橙, TEXT→白, LINE→紫) + sphere→store 解析 |
-| 消息拦截 (project list) | L821-831 | `/waypoint_project_list` JSON 解析 → setProjectList() |
-| Ref 定义 | L841 | `publishDroneIdRef = useRef<string \| undefined>(undefined)` |
-| advertise | L866-870 | GoalSet topic: `/goal_with_id` |
-| unadvertise | L876 | cleanup GoalSet topic |
-| lock droneId | L885-887 | publish 工具启动时锁定 droneId |
-| re-advertise | L913-915 | publish submit 时重新 advertise |
-| GoalSet publish | L928-942 | `makeGoalSetMessage(droneId, position)` → `context.publish()` |
+| import | L37-39 | `TOPIC_CONFIG, WAYPOINT_COLORS, extractDroneIdFromTopic, TELEMETRY_TOPICS` from topicConfig (不再导入 `PROJECT_TOPICS`) |
+| import | L40-42 | `useDroneTelemetryStore`, `useSceneModeStore`, `useWaypointStore` |
+| import | L56-57 | `GoalSetDatatypes, makeGoalSetMessage` from publish |
+| 读取 Store | L645-651 | `sceneMode`, `updateOdom`, `setWaypointsFromMarkers`, `setProjectList`, `updateBattery` |
+| 动态订阅 (odom) | L664-673 | mapping 模式: 正则 `/^\/drone_\w+_visual_slam\/odom$/` 匹配所有 odom topic |
+| 动态订阅 (project list) | L675-683 | mapping 模式: 正则 `/^\/drone_\d+_waypoint_project_list$/` 匹配所有 per-drone 项目列表 topic |
+| 动态订阅 (telemetry) | L691-700 | 所有模式: 订阅 `TELEMETRY_TOPICS.battery` |
+| 消息拦截 (odom) | L772-784 | 正则匹配 → `extractDroneIdFromTopic` → `updateOdom(droneId, pos)` |
+| 消息拦截 (markers) | L787-838 | 正则 `/^\/drone_\d+_waypoint_markers$/` 匹配所有 per-drone marker topic: 颜色覆盖 (SPHERE→橙, TEXT→白, LINE→紫) + `extractDroneIdFromTopic` → `setWaypointsFromMarkers(droneId, waypoints)` |
+| 消息拦截 (project list) | L841-853 | 正则 `/^\/drone_\d+_waypoint_project_list$/` 匹配所有 per-drone topic: JSON 解析 → `extractDroneIdFromTopic` → `setProjectList(droneId, projects)` |
+| 消息拦截 (battery) | L857-863 | 所有模式: 拦截 battery 消息 → `updateBattery(voltage)` |
+| Ref 定义 | L969 | `publishDroneIdRef = useRef<string \| undefined>(undefined)` |
+| advertise | L989-998 | GoalSet topic: `TOPIC_CONFIG.publish.goalWithId` (`/goal_with_id`) |
+| unadvertise | L1000-1005 | cleanup 全部 publish topic |
+| lock droneId | L1013-1015 | publish 工具启动时从选中对象锁定 droneId |
+| re-advertise | L1034-1043 | publish submit 时重新 advertise (含 GoalSet) |
+| GoalSet publish | L1056-1067 | `makeGoalSetMessage(droneId, position)` → `context.publish()` |
+
+> **变更**: `waypoint_markers` 不再需要手动额外订阅，已通过 `useActiveDroneRouting` 的 config routing 自动订阅。`waypoint_project_list` 使用正则订阅所有 drone 的 topic。消息拦截均使用正则匹配 per-drone topic 并通过 `extractDroneIdFromTopic` 提取 droneId 用于 store 更新。
 
 ### 4.4 Interactions.tsx
 
@@ -697,8 +733,8 @@ bool returned   # 是否已返航
 ### 5.4 visualization_msgs/MarkerArray
 
 **用途**: 航点可视化标记
-**发布 topic**: `/waypoint_markers`
-**发布者**: WaypointPanel
+**发布 topic**: `/drone_{id}_waypoint_markers` (per-drone)
+**发布者**: 后端 (根据前端通过 `/drone_{id}_add_waypoint` 等操作 topic 触发)
 **颜色覆盖**: ThreeDeeRender 拦截后重写颜色 (WAYPOINT_COLORS)
 
 ```text
@@ -741,10 +777,20 @@ std_msgs/String
 
 **各 Topic 的 payload 格式**:
 
+> 所有航点管理 topic 均为 per-drone 格式 `/drone_{id}_<base>`。后端通过 topic 中的 drone_id 前缀识别目标无人机，无需额外 `_drone_id` 参数。
+
 | Topic | 方向 | data 内容 | 示例 |
 | --- | --- | --- | --- |
-| `/save_waypoints` | 前端→后端 | 项目名 (纯文本) | `"route_A"` |
-| `/load_waypoints` | 前端→后端 | 项目名 (纯文本) | `"route_A"` |
-| `/delete_waypoint_project` | 前端→后端 | 逗号分隔的项目名 | `"route_A,route_B"` |
-| `/reorder_waypoints` | 前端→后端 | JSON: 新航点顺序 | `'{"order": [2, 3, 1, 4]}'` |
-| `/waypoint_project_list` | 后端→前端 | JSON: 可用项目列表 | `'{"projects": ["route_A", "test_1"]}'` |
+| `/drone_{id}_save_waypoints` | 前端→后端 | 项目名 (纯文本) | `"route_A"` |
+| `/drone_{id}_load_waypoints` | 前端→后端 | 项目名 (纯文本) | `"route_A"` |
+| `/drone_{id}_delete_waypoint_project` | 前端→后端 | 逗号分隔的项目名 | `"route_A,route_B"` |
+| `/drone_{id}_reorder_waypoints` | 前端→后端 | JSON: 新航点顺序 | `'{"order": [2, 3, 1, 4]}'` |
+| `/drone_{id}_waypoint_project_list` | 后端→前端 | JSON: 可用项目列表 | `'{"projects": ["route_A", "test_1"]}'` |
+
+**航点操作 Topic** (payload 格式不同):
+
+| Topic | 消息类型 | 方向 | payload | 示例 |
+| --- | --- | --- | --- | --- |
+| `/drone_{id}_add_waypoint` | `geometry_msgs/PoseStamped` | 前端→后端 | PoseStamped (含 position + orientation) | `{ header: {...}, pose: { position: {x, y, z}, orientation: {x:0, y:0, z:0, w:1} } }` |
+| `/drone_{id}_remove_waypoint` | `std_msgs/Int32` | 前端→后端 | 航点索引号 | `{ data: 2 }` |
+| `/drone_{id}_clear_waypoints` | `std_msgs/Empty` | 前端→后端 | 空 | `{}` |

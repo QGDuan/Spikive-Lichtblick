@@ -15,21 +15,20 @@ import {
 } from "@mui/material";
 import { useCallback, useState } from "react";
 
-import { useWaypointStore } from "@lichtblick/suite-base/spikive/stores/useWaypointStore";
-
 type LoadProjectDialogProps = {
   open: boolean;
   onClose: () => void;
   onLoad: (name: string) => void;
+  projectList: string[];
 };
 
 export function LoadProjectDialog({
   open,
   onClose,
   onLoad,
+  projectList,
 }: LoadProjectDialogProps): React.JSX.Element {
   const [selected, setSelected] = useState("");
-  const projectList = useWaypointStore((s) => s.projectList);
 
   const handleConfirm = useCallback(() => {
     if (selected) {
