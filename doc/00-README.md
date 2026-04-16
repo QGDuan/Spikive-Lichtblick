@@ -32,6 +32,7 @@
 | [03-scenario-autonomous-flight.md](./03-scenario-autonomous-flight.md) | 开发或调试 **自主飞行** 场景 |
 | [04-scenario-mapping-waypoint.md](./04-scenario-mapping-waypoint.md) | 开发或调试 **建图打点** 场景 |
 | [05-api-reference.md](./05-api-reference.md) | 查找具体函数签名、Store API、消息格式 |
+| [06-scenario-waypoint-execution.md](./06-scenario-waypoint-execution.md) | 开发或调试 **航线执行** 功能 (自主飞行模式下加载并自动执行航线) |
 | [drone-id-routing.md](./drone-id-routing.md) | 深入理解 drone_id 路由机制 (已有文档) |
 
 ## 文档维护规范

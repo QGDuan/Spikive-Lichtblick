@@ -32,6 +32,10 @@ const BASE_TOPICS = {
   // Waypoint response topics
   waypointMarkers: "waypoint_markers",
   waypointProjectList: "waypoint_project_list",
+  // Waypoint execution topics
+  startWaypointExec: "start_waypoint_exec",
+  stopWaypointExec: "stop_waypoint_exec",
+  waypointExecState: "waypoint_exec_state",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -53,6 +57,9 @@ export type DroneTopics = {
   reorderWaypoints: string;
   waypointMarkers: string;
   waypointProjectList: string;
+  startWaypointExec: string;
+  stopWaypointExec: string;
+  waypointExecState: string;
 };
 
 /** Build fully-qualified topic names for a given drone ID. */
@@ -74,6 +81,9 @@ export function droneTopics(droneId: string | number): DroneTopics {
     reorderWaypoints: `/drone_${id}_${BASE_TOPICS.reorderWaypoints}`,
     waypointMarkers: `/drone_${id}_${BASE_TOPICS.waypointMarkers}`,
     waypointProjectList: `/drone_${id}_${BASE_TOPICS.waypointProjectList}`,
+    startWaypointExec: `/drone_${id}_${BASE_TOPICS.startWaypointExec}`,
+    stopWaypointExec: `/drone_${id}_${BASE_TOPICS.stopWaypointExec}`,
+    waypointExecState: `/drone_${id}_${BASE_TOPICS.waypointExecState}`,
   };
 }
 

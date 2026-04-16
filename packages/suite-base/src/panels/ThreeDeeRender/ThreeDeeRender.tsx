@@ -646,31 +646,31 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
   const updateOdom = useWaypointStore((s) => s.updateOdom);
   const setWaypointsFromMarkers = useWaypointStore((s) => s.setWaypointsFromMarkers);
   const setProjectList = useWaypointStore((s) => s.setProjectList);
+  const setExecState = useWaypointStore((s) => s.setExecState);
 
   // Spikive: telemetry store for battery / GPS
   const updateBattery = useDroneTelemetryStore((s) => s.updateBattery);
 
   // Notify the extension context when our subscription list changes.
-  // In mapping mode, also subscribe to odom topics and /waypoint_markers.
+  // Subscribe to waypoint_markers, project_list, and exec_state in all modes.
+  // In mapping mode, also subscribe to odom topics.
   // Always subscribe to telemetry topics (battery, GPS).
   useEffect(() => {
-    if (!topicsToSubscribe) {
-      return;
-    }
-
-    let subs = topicsToSubscribe;
+    const baseSubs = topicsToSubscribe ?? [];
+    let subs = baseSubs;
     const extraSubs: typeof subs = [];
 
-    if (sceneMode === "mapping-waypoint" && topics) {
-      // Subscribe to all odom topics for position display
-      const odomSubs = topics
-        .filter((t) => /^\/drone_\w+_visual_slam\/odom$/.test(t.name))
+    // Spikive: subscribe to waypoint-related topics in ALL scene modes
+    if (topics) {
+      // Subscribe to all per-drone waypoint_markers topics
+      const waypointMarkerSubs = topics
+        .filter((t) => /^\/drone_\d+_waypoint_markers$/.test(t.name))
         .map((t) => ({
           topic: t.name,
           preload: false as const,
           sampling: { mode: "latest-per-render-tick" as const },
         }));
-      extraSubs.push(...odomSubs);
+      extraSubs.push(...waypointMarkerSubs);
 
       // Subscribe to all per-drone waypoint_project_list topics
       const projectListSubs = topics
@@ -682,9 +682,33 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
         }));
       extraSubs.push(...projectListSubs);
 
+      // Subscribe to all per-drone waypoint_exec_state topics
+      const execStateSubs = topics
+        .filter((t) => /^\/drone_\d+_waypoint_exec_state$/.test(t.name))
+        .map((t) => ({
+          topic: t.name,
+          preload: false as const,
+          sampling: { mode: "latest-per-render-tick" as const },
+        }));
+      extraSubs.push(...execStateSubs);
+
       log.info(
-        `[Spikive] Mapping mode: ${odomSubs.length} odom + ${projectListSubs.length} project_list`,
+        `[Spikive] Waypoint subs: ${waypointMarkerSubs.length} markers + ${projectListSubs.length} project_list + ${execStateSubs.length} exec_state`,
       );
+    }
+
+    if (sceneMode === "mapping-waypoint" && topics) {
+      // Subscribe to all odom topics for position display (mapping mode only)
+      const odomSubs = topics
+        .filter((t) => /^\/drone_\w+_visual_slam\/odom$/.test(t.name))
+        .map((t) => ({
+          topic: t.name,
+          preload: false as const,
+          sampling: { mode: "latest-per-render-tick" as const },
+        }));
+      extraSubs.push(...odomSubs);
+
+      log.info(`[Spikive] Mapping mode: ${odomSubs.length} odom`);
     }
 
     // Spikive: always subscribe to telemetry topics (battery)
@@ -700,7 +724,7 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
     }
 
     if (extraSubs.length > 0) {
-      subs = [...topicsToSubscribe, ...extraSubs];
+      subs = [...baseSubs, ...extraSubs];
     }
 
     log.debug(`Subscribing to [${subs.map((t) => JSON.stringify(t)).join(", ")}]`);
@@ -766,7 +790,96 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
     }
 
     for (const message of currentFrameMessages) {
-      // Spikive: in mapping mode, intercept and process special topics
+      // Spikive: intercept waypoint-related topics in ALL modes
+      // Intercept per-drone /waypoint_markers: rewrite colors before rendering, then parse for store
+      if (/^\/drone_\d+_waypoint_markers$/.test(message.topic)) {
+        const markerArray = message.message as {
+          markers?: Array<{
+            id?: number;
+            type?: number;
+            ns?: string;
+            color?: { r: number; g: number; b: number; a: number };
+            pose?: { position?: { x: number; y: number; z: number } };
+          }>;
+        };
+        if (markerArray.markers) {
+          // Rewrite marker colors by type (frontend-defined)
+          const recolored = markerArray.markers.map((m) => {
+            switch (m.type) {
+              case 2: // SPHERE
+                return { ...m, color: WAYPOINT_COLORS.sphere };
+              case 9: // TEXT_VIEW_FACING
+                return { ...m, color: WAYPOINT_COLORS.text };
+              case 4: // LINE_STRIP
+                return { ...m, color: WAYPOINT_COLORS.line };
+              default:
+                return m;
+            }
+          });
+          const recoloredMessage = {
+            ...message,
+            message: { ...markerArray, markers: recolored },
+          };
+          renderer.addMessageEvent(recoloredMessage);
+
+          // Parse sphere markers for the waypoint store list
+          const spheres = markerArray.markers
+            .filter((m) => m.type === 2 && m.ns === "waypoints" && (m.id ?? 0) < 10000)
+            .sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+          const waypoints = spheres.map((m, i) => ({
+            idx: i + 1,
+            x: Math.round((m.pose?.position?.x ?? 0) * 1000) / 1000,
+            y: Math.round((m.pose?.position?.y ?? 0) * 1000) / 1000,
+            z: Math.round((m.pose?.position?.z ?? 0) * 1000) / 1000,
+          }));
+          log.info(
+            `[Spikive] waypoint_markers received from ${message.topic}: ${markerArray.markers.length} markers, ${spheres.length} spheres → store updated`,
+          );
+          const markerDroneId = extractDroneIdFromTopic(message.topic);
+          if (markerDroneId != undefined) {
+            setWaypointsFromMarkers(markerDroneId, waypoints);
+          }
+        } else {
+          renderer.addMessageEvent(message);
+        }
+        continue;
+      }
+
+      // Intercept per-drone /waypoint_project_list: parse project names into store
+      if (/^\/drone_\d+_waypoint_project_list$/.test(message.topic)) {
+        try {
+          const payload = (message.message as { data: string }).data;
+          const data = JSON.parse(payload) as { projects?: string[] };
+          const projectDroneId = extractDroneIdFromTopic(message.topic);
+          if (projectDroneId != undefined) {
+            log.info(
+              `[Spikive] project_list received from ${message.topic}: ${(data.projects ?? []).length} projects`,
+            );
+            setProjectList(projectDroneId, data.projects ?? []);
+          }
+        } catch (err) {
+          log.warn(`[Spikive] Failed to parse project_list from ${message.topic}:`, err);
+        }
+        continue;
+      }
+
+      // Intercept per-drone /waypoint_exec_state: update execution state in store
+      if (/^\/drone_\d+_waypoint_exec_state$/.test(message.topic)) {
+        try {
+          const payload = (message.message as { data: string }).data;
+          if (payload === "idle" || payload === "executing") {
+            const execDroneId = extractDroneIdFromTopic(message.topic);
+            if (execDroneId != undefined) {
+              setExecState(execDroneId, payload);
+            }
+          }
+        } catch {
+          // ignore malformed messages
+        }
+        continue;
+      }
+
+      // Spikive: in mapping mode, intercept odom for position display
       if (sceneMode === "mapping-waypoint") {
         // Intercept odom messages and push position into waypoint store
         if (/^\/drone_\w+_visual_slam\/odom$/.test(message.topic)) {
@@ -781,75 +894,6 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
               updateOdom(droneId, { x: p.x, y: p.y, z: p.z });
             }
           }
-        }
-
-        // Intercept per-drone /waypoint_markers: rewrite colors before rendering, then parse for store
-        if (/^\/drone_\d+_waypoint_markers$/.test(message.topic)) {
-          const markerArray = message.message as {
-            markers?: Array<{
-              id?: number;
-              type?: number;
-              ns?: string;
-              color?: { r: number; g: number; b: number; a: number };
-              pose?: { position?: { x: number; y: number; z: number } };
-            }>;
-          };
-          if (markerArray.markers) {
-            // Rewrite marker colors by type (frontend-defined)
-            const recolored = markerArray.markers.map((m) => {
-              switch (m.type) {
-                case 2: // SPHERE
-                  return { ...m, color: WAYPOINT_COLORS.sphere };
-                case 9: // TEXT_VIEW_FACING
-                  return { ...m, color: WAYPOINT_COLORS.text };
-                case 4: // LINE_STRIP
-                  return { ...m, color: WAYPOINT_COLORS.line };
-                default:
-                  return m;
-              }
-            });
-            const recoloredMessage = {
-              ...message,
-              message: { ...markerArray, markers: recolored },
-            };
-            renderer.addMessageEvent(recoloredMessage);
-
-            // Parse sphere markers for the waypoint store list
-            const spheres = markerArray.markers
-              .filter((m) => m.type === 2 && m.ns === "waypoints" && (m.id ?? 0) < 10000)
-              .sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
-            const waypoints = spheres.map((m, i) => ({
-              idx: i + 1,
-              x: Math.round((m.pose?.position?.x ?? 0) * 1000) / 1000,
-              y: Math.round((m.pose?.position?.y ?? 0) * 1000) / 1000,
-              z: Math.round((m.pose?.position?.z ?? 0) * 1000) / 1000,
-            }));
-            log.info(
-              `[Spikive] waypoint_markers received from ${message.topic}: ${markerArray.markers.length} markers, ${spheres.length} spheres → store updated`,
-            );
-            const markerDroneId = extractDroneIdFromTopic(message.topic);
-            if (markerDroneId != undefined) {
-              setWaypointsFromMarkers(markerDroneId, waypoints);
-            }
-          } else {
-            renderer.addMessageEvent(message);
-          }
-          continue;
-        }
-
-        // Intercept per-drone /waypoint_project_list: parse project names into store
-        if (/^\/drone_\d+_waypoint_project_list$/.test(message.topic)) {
-          try {
-            const payload = (message.message as { data: string }).data;
-            const data = JSON.parse(payload) as { projects?: string[] };
-            const projectDroneId = extractDroneIdFromTopic(message.topic);
-            if (projectDroneId != undefined) {
-              setProjectList(projectDroneId, data.projects ?? []);
-            }
-          } catch {
-            // ignore malformed messages
-          }
-          continue;
         }
       }
 
@@ -873,6 +917,7 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
     updateOdom,
     setWaypointsFromMarkers,
     setProjectList,
+    setExecState,
     updateBattery,
   ]);
 

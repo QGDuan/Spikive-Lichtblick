@@ -19,6 +19,9 @@ export type OdomPosition = {
 /** Z-axis adjustment mode: none = raw z, override = fixed value */
 export type ZMode = "none" | "override";
 
+/** Waypoint execution state published by the backend. */
+export type ExecState = "idle" | "executing";
+
 export type DroneWaypointState = {
   waypoints: Waypoint[];
   zMode: ZMode;
@@ -49,6 +52,7 @@ type WaypointStore = {
   tables: Record<string, DroneWaypointState>;
   latestOdom: Record<string, OdomPosition>;
   projectLists: Record<string, string[]>;
+  execStates: Record<string, ExecState>;
 
   getOrCreate: (droneId: string) => DroneWaypointState;
   /** Replace the waypoint list for a drone (driven by backend /waypoint_markers). */
@@ -59,12 +63,14 @@ type WaypointStore = {
   ) => void;
   updateOdom: (droneId: string, pos: OdomPosition) => void;
   setProjectList: (droneId: string, list: string[]) => void;
+  setExecState: (droneId: string, state: ExecState) => void;
 };
 
 export const useWaypointStore = create<WaypointStore>((set, get) => ({
   tables: {},
   latestOdom: {},
   projectLists: {},
+  execStates: {},
 
   getOrCreate: (droneId: string): DroneWaypointState => {
     const existing = get().tables[droneId];
@@ -109,5 +115,9 @@ export const useWaypointStore = create<WaypointStore>((set, get) => ({
 
   setProjectList: (droneId: string, list: string[]) => {
     set((s) => ({ projectLists: { ...s.projectLists, [droneId]: list } }));
+  },
+
+  setExecState: (droneId: string, state: ExecState) => {
+    set((s) => ({ execStates: { ...s.execStates, [droneId]: state } }));
   },
 }));

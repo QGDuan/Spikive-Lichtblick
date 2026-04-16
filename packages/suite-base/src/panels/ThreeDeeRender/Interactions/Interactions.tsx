@@ -25,9 +25,11 @@ import ExpandingToolbar, {
   ToolGroupFixedSizePane,
 } from "@lichtblick/suite-base/components/ExpandingToolbar";
 import { DroneControlPanel } from "@lichtblick/suite-base/spikive/components/DroneControlPanel";
+import { WaypointExecPanel } from "@lichtblick/suite-base/spikive/components/WaypointExecPanel";
 import { WaypointPanel } from "@lichtblick/suite-base/spikive/components/WaypointPanel";
 import { extractDroneIdFromTopic } from "@lichtblick/suite-base/spikive/config/topicConfig";
 import { useSceneModeStore } from "@lichtblick/suite-base/spikive/stores/useSceneModeStore";
+import { useWaypointStore } from "@lichtblick/suite-base/spikive/stores/useWaypointStore";
 
 import { InteractionData } from "./types";
 import { Pose } from "../transforms";
@@ -77,7 +79,7 @@ const InteractionsBaseComponent = React.memo<Props>(function InteractionsBaseCom
   const droneId = topic != undefined ? extractDroneIdFromTopic(topic) : undefined;
   const sceneMode = useSceneModeStore((s) => s.sceneMode);
 
-  // In mapping mode, remember the last selected droneId so the panel persists
+  // Remember the last selected droneId so the panel persists
   // when the user clicks empty space (selectedObject → undefined).
   const lastDroneIdRef = useRef<string | undefined>(undefined);
   if (droneId != undefined) {
@@ -85,8 +87,13 @@ const InteractionsBaseComponent = React.memo<Props>(function InteractionsBaseCom
   }
 
   const isMapping = sceneMode === "mapping-waypoint";
-  // In mapping mode, fall back to the remembered droneId when nothing is selected
-  const activeDroneId = droneId ?? (isMapping ? lastDroneIdRef.current : undefined);
+  // In both modes, fall back to the remembered droneId when nothing is selected
+  const activeDroneId = droneId ?? lastDroneIdRef.current;
+
+  // Check if waypoints are loaded for the active drone (used in autonomous-flight mode)
+  const hasWaypoints = useWaypointStore(
+    (s) => (activeDroneId ? (s.tables[activeDroneId]?.waypoints.length ?? 0) > 0 : false),
+  );
 
   return (
     <ExpandingToolbar
@@ -98,7 +105,7 @@ const InteractionsBaseComponent = React.memo<Props>(function InteractionsBaseCom
       }}
     >
       <ToolGroup name={OBJECT_TAB_TYPE}>
-        <ToolGroupFixedSizePane maxHeight={isMapping ? undefined : 240}>
+        <ToolGroupFixedSizePane maxHeight={isMapping || hasWaypoints ? undefined : 240}>
           {activeDroneId != undefined ? (
             isMapping ? (
               <WaypointPanel
@@ -108,16 +115,26 @@ const InteractionsBaseComponent = React.memo<Props>(function InteractionsBaseCom
                 unadvertise={unadvertise}
               />
             ) : (
-              <DroneControlPanel
-                droneId={activeDroneId}
-                onClickPublish={onClickPublish}
-                publishActive={publishActive}
-                canPublish={canPublish}
-                publish={publish}
-                advertise={advertise}
-                unadvertise={unadvertise}
-                dataSourceProfile={dataSourceProfile}
-              />
+              <>
+                <DroneControlPanel
+                  droneId={activeDroneId}
+                  onClickPublish={onClickPublish}
+                  publishActive={publishActive}
+                  canPublish={canPublish}
+                  publish={publish}
+                  advertise={advertise}
+                  unadvertise={unadvertise}
+                  dataSourceProfile={dataSourceProfile}
+                />
+                {hasWaypoints && (
+                  <WaypointExecPanel
+                    droneId={activeDroneId}
+                    publish={publish}
+                    advertise={advertise}
+                    unadvertise={unadvertise}
+                  />
+                )}
+              </>
             )
           ) : (
             <Typography variant="body2" color="text.disabled" gutterBottom>
