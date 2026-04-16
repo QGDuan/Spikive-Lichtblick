@@ -61,6 +61,7 @@ import {
   makePoseEstimateMessage,
   makePoseMessage,
 } from "./publish";
+import type { Pose } from "./transforms/geometry";
 import type { LayerSettingsTransform } from "./renderables/FrameAxes";
 import { PublishClickEventMap } from "./renderables/PublishClickTool";
 import { DEFAULT_PUBLISH_SETTINGS } from "./renderables/PublishSettings";
@@ -1061,8 +1062,8 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
       setPublishActive(true);
     };
     const onSubmit = (event: PublishClickEventMap["foxglove.publish-submit"]) => {
-      const frameId = renderer?.followFrameId;
-      if (frameId == undefined) {
+      const displayFrameId = renderer?.followFrameId;
+      if (displayFrameId == undefined) {
         log.warn("Unable to publish, renderFrameId is not set");
         return;
       }
@@ -1073,6 +1074,44 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
       if (context.dataSourceProfile !== "ros1" && context.dataSourceProfile !== "ros2") {
         log.warn("Publishing is only supported in ros1 and ros2");
         return;
+      }
+
+      // Spikive: transform pose from display frame (e.g. "base1") to "world" frame.
+      // EGO-Planner expects goal coordinates in the "world" frame, but the 3D click
+      // tool gives coordinates in the renderer's display frame (followTf).
+      // When tf45=true, the TF tree has world->base{N}, so clicks are in body frame.
+      // We must transform back to world before publishing.
+      const WORLD_FRAME = "world";
+      let publishFrameId = displayFrameId;
+      let worldPose: Pose | undefined;
+      if (event.publishClickType !== "point") {
+        worldPose = event.pose;
+        if (displayFrameId !== WORLD_FRAME && renderer) {
+          const curTime = renderer.currentTime;
+          const output: Pose = { position: { x: 0, y: 0, z: 0 }, orientation: { x: 0, y: 0, z: 0, w: 1 } };
+          const transformed = renderer.transformTree.apply(
+            output,
+            event.pose,
+            WORLD_FRAME,       // frameId: target frame
+            undefined,         // rootFrameId: let the tree find the root
+            displayFrameId,    // srcFrameId: source frame of the input pose
+            curTime,           // dstTime
+            curTime,           // srcTime
+          );
+          if (transformed) {
+            worldPose = transformed;
+            publishFrameId = WORLD_FRAME;
+            log.info(
+              `[Spikive] Transformed pose from ${displayFrameId} to ${WORLD_FRAME}: ` +
+              `(${event.pose.position.x.toFixed(2)}, ${event.pose.position.y.toFixed(2)}, ${event.pose.position.z.toFixed(2)}) → ` +
+              `(${worldPose.position.x.toFixed(2)}, ${worldPose.position.y.toFixed(2)}, ${worldPose.position.z.toFixed(2)})`,
+            );
+          } else {
+            log.warn(
+              `[Spikive] Failed to transform pose from ${displayFrameId} to ${WORLD_FRAME}, publishing in display frame`,
+            );
+          }
+        }
       }
 
       // Ensure topics are advertised before publishing (defensive re-advertise)
@@ -1090,37 +1129,41 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
       try {
         switch (event.publishClickType) {
           case "point": {
-            const message = makePointMessage(event.point, frameId);
+            const message = makePointMessage(event.point, publishFrameId);
             context.publish(publishTopics.point, message);
             break;
           }
           case "pose": {
-            const message = makePoseMessage(event.pose, frameId);
-            context.publish(publishTopics.goal, message);
+            if (worldPose) {
+              const message = makePoseMessage(worldPose, publishFrameId);
+              context.publish(publishTopics.goal, message);
 
-            // Spikive: publish GoalSet to /goal_with_id for EGO-Planner
-            // drone_id was locked from the selected object's topic at publish start
-            const droneIdStr = publishDroneIdRef.current;
-            if (droneIdStr != undefined) {
-              const goalSetMsg = makeGoalSetMessage(Number(droneIdStr), event.pose.position);
-              log.info(
-                `Publishing GoalSet to ${TOPIC_CONFIG.publish.goalWithId}: drone_id=${droneIdStr}, goal=[${event.pose.position.x}, ${event.pose.position.y}, ${event.pose.position.z}]`,
-              );
-              context.publish(TOPIC_CONFIG.publish.goalWithId, goalSetMsg);
-            } else {
-              log.warn("No selected object topic to extract drone_id, skipping GoalSet publish");
+              // Spikive: publish GoalSet to /goal_with_id for EGO-Planner
+              // drone_id was locked from the selected object's topic at publish start
+              const droneIdStr = publishDroneIdRef.current;
+              if (droneIdStr != undefined) {
+                const goalSetMsg = makeGoalSetMessage(Number(droneIdStr), worldPose.position);
+                log.info(
+                  `Publishing GoalSet to ${TOPIC_CONFIG.publish.goalWithId}: drone_id=${droneIdStr}, goal=[${worldPose.position.x.toFixed(2)}, ${worldPose.position.y.toFixed(2)}, ${worldPose.position.z.toFixed(2)}]`,
+                );
+                context.publish(TOPIC_CONFIG.publish.goalWithId, goalSetMsg);
+              } else {
+                log.warn("No selected object topic to extract drone_id, skipping GoalSet publish");
+              }
             }
             break;
           }
           case "pose_estimate": {
-            const message = makePoseEstimateMessage(
-              event.pose,
-              frameId,
-              latestPublishConfig.current.poseEstimateXDeviation,
-              latestPublishConfig.current.poseEstimateYDeviation,
-              latestPublishConfig.current.poseEstimateThetaDeviation,
-            );
-            context.publish(publishTopics.pose, message);
+            if (worldPose) {
+              const message = makePoseEstimateMessage(
+                worldPose,
+                publishFrameId,
+                latestPublishConfig.current.poseEstimateXDeviation,
+                latestPublishConfig.current.poseEstimateYDeviation,
+                latestPublishConfig.current.poseEstimateThetaDeviation,
+              );
+              context.publish(publishTopics.pose, message);
+            }
             break;
           }
         }
