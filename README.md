@@ -31,14 +31,17 @@ Spikive Ground Station 是一套面向多无人机 SLAM 建图、路径规划与
 ### 两种操作场景
 
 **自主飞行模式**
-- 在 3D 场景中点击无人机模型，弹出飞控面板（起飞/降落/返航/停止/继续）
-- 通过 2D Nav Goal 工具向 EGO-Planner 发送目标点，实时规划并执行
+- 在 3D 场景中点击无人机模型，弹出飞控面板（起飞/降落/返航/停止）
+- 通过 Publish Pose 工具向 EGO-Planner 发送目标点，实时规划并执行
+- 加载建图打点场景保存的航点项目，一键执行自动逐点导航航线
+- Stop 按钮双通道急停：同时发送飞控 cmd=5 和后端 stop_waypoint_exec
 
 **建图打点模式**
 - 拦截无人机 odom 数据，实时显示当前位置
 - 一键 Record 记录航点，支持 Z 轴覆写调整
 - 后端维护航点列表，3D 场景中渲染航点球体、序号标签和连接线
 - 支持单点删除和一键清空
+- 航点项目持久化：Save / Load / Delete / 拖拽排序
 
 ### 3D 可视化
 - SLAM 点云（单色灰调，60s 衰减）
@@ -67,16 +70,25 @@ packages/suite-base/src/
 ├── spikive/                          # Spikive 自定义代码（与 Lichtblick 核心解耦）
 │   ├── components/
 │   │   ├── SceneSelectionDialog.tsx   # 场景模式选择弹窗
-│   │   ├── DroneControlPanel.tsx      # 飞控面板（起飞/降落/返航/停止）
-│   │   ├── WaypointPanel.tsx          # 航点记录面板（打点/删除/清空）
+│   │   ├── DroneControlPanel.tsx      # 飞控面板（起飞/降落/返航/停止 + 加载航线）
+│   │   ├── WaypointPanel.tsx          # 航点记录面板（打点/删除/清空/排序/项目持久化）
+│   │   ├── WaypointExecPanel.tsx      # 航线执行面板（只读表格 + 执行/清除）
+│   │   ├── SaveProjectDialog.tsx      # 保存航点项目对话框
+│   │   ├── LoadProjectDialog.tsx      # 加载航点项目对话框
+│   │   ├── ManageProjectsDialog.tsx   # 管理航点项目对话框
+│   │   ├── DroneStatusIndicators.tsx  # 无人机状态指示器
+│   │   ├── SpikiveTitleBar.tsx       # 自定义标题栏（品牌 + 设置入口）
+│   │   ├── SpikiveSettingsDialog.tsx  # 可视化设置弹窗（背景/性能/点云样式）
 │   │   └── ThemeToggleButton.tsx      # 主题切换
 │   ├── config/
-│   │   └── topicConfig.ts            # Topic 命名规范 + 颜色常量
+│   │   └── topicConfig.ts            # Topic 命名规范 + 颜色常量 (18 字段)
 │   ├── hooks/
 │   │   └── useActiveDroneRouting.ts  # 动态 Topic 重映射
 │   ├── stores/
 │   │   ├── useSceneModeStore.ts      # 场景模式状态
-│   │   └── useWaypointStore.ts       # 航点数据 + Odom 追踪
+│   │   ├── useWaypointStore.ts       # 航点数据 + Odom 追踪 + 执行状态
+│   │   ├── useDroneTelemetryStore.ts # 电池/GPS 遥测数据
+│   │   └── useVisualizationStore.ts  # 可视化设置（点云衰减/颜色/透明度/大小）
 │   └── styles/
 │       └── spikiveGlobalOverrides.css # 隐藏原生 UI 元素
 ├── components/
@@ -152,9 +164,10 @@ docker run -p 8080:8080 spikive-ground-station
 | --- | --- |
 | [架构总览](doc/01-architecture-overview.md) | 系统架构、组件树、状态流、Topic 路由 |
 | [增量演进](doc/02-incremental-evolution.md) | Git 提交历史与设计决策 |
-| [自主飞行场景](doc/03-scenario-autonomous-flight.md) | GoalSet 发布、DroneControlPanel 生命周期 |
-| [建图打点场景](doc/04-scenario-mapping-waypoint.md) | Odom 拦截、MarkerArray 可视化、Z 轴逻辑 |
+| [自主飞行场景](doc/03-scenario-autonomous-flight.md) | GoalSet 发布、DroneControlPanel、航线加载与执行 |
+| [建图打点场景](doc/04-scenario-mapping-waypoint.md) | Odom 拦截、MarkerArray 可视化、Z 轴逻辑、项目持久化 |
 | [API 参考](doc/05-api-reference.md) | Store API、ROS 消息格式、修改点清单 |
+| [航线执行场景](doc/06-scenario-waypoint-execution.md) | 航线加载、自动逐点导航、后端状态机 |
 | [Drone ID 路由](doc/drone-id-routing.md) | 路由架构深度解析 |
 
 ## 架构原则
@@ -162,6 +175,7 @@ docker run -p 8080:8080 spikive-ground-station
 - **保持 Lichtblick 核心纯洁** — 所有新代码隔离在 `spikive/` 命名空间，上游可合并
 - **标注修改点** — 所有对 Lichtblick 的改动以 `// Spikive:` 注释标记
 - **场景驱动** — 两种模式共享基础设施（路由、侧边栏），仅交互处理器不同
+- **前后端职责分离** — 前端仅负责 UI 与消息发布，后端维护航点列表和执行状态机
 - **单一数据源** — Zustand Store 驱动，无 prop drilling
 
 ## 许可证

@@ -7,7 +7,8 @@
  * Preserved: left Robots sidebar, 3D panel canvas, publish tool overlay.
  */
 
-/* ── AppBar (top navigation bar) ── */
+/* ── AppBar (original Lichtblick navigation bar) ──
+   Completely hidden — replaced by the SpikiveTitleBar component. */
 [data-tourid="app-bar"] {
   display: none !important;
 }
@@ -27,5 +28,18 @@ div[style*="flex-shrink: 0"]:has([data-testid="play-button"]) {
 
 /* ── PanelToolbar (drag handle / settings gear above each panel) ── */
 [data-testid="mosaic-drag-handle"] {
+  display: none !important;
+}
+
+/* ── 3D Panel topLeft toolbar (3D/2D toggle + Measure button) ── */
+[data-testid="spikive-hide-3d-toolbar"] {
+  display: none !important;
+}
+
+/* ── Left sidebar: hide tab title row and divider ──
+   Only one tab ("Robots") exists, so the tab bar is unnecessary.
+   The header row is the first div child; Divider renders as <hr>. */
+[data-testid="sidebar-left"] > div:first-of-type,
+[data-testid="sidebar-left"] > hr {
   display: none !important;
 }

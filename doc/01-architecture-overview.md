@@ -40,7 +40,7 @@
 
 - **Topic 命名规范**：`/drone_{id}_{base_topic}`（如 `/drone_1_cloud_registered`）
 - **TF 帧命名**：`base{id}`（如 `base1`）
-- **路由函数**：`droneTopics(id)` 输入一个 ID，输出完整的 15 个 topic 路径（含航点相关 topic）
+- **路由函数**：`droneTopics(id)` 输入一个 ID，输出完整的 18 个 topic 路径（含航点管理和执行相关 topic）
 - 切换活跃无人机时，通过 `useActiveDroneRouting` hook 重写 3D Panel 的全部 topic 订阅
 
 ### 1.4 Zustand 单向数据流
@@ -165,6 +165,8 @@
 ║  │  订阅方向 (ROS → 前端, per-drone):                               │    ║
 ║  │    /drone_{id}_waypoint_markers        (MarkerArray)           │    ║
 ║  │    /drone_{id}_waypoint_project_list   (std_msgs/String)       │    ║
+║  │    /drone_{id}_waypoint_exec_state     (std_msgs/String)       │    ║
+║  │    /drone_{id}_state                   (DroneState)            │    ║
 ║  └────────────────────────────────────────────────────────────────┘    ║
 ║                                                                        ║
 ║  ┌────────────────────┐  ┌─────────────────┐                          ║
@@ -219,7 +221,16 @@ Workspace (根组件)
             ├── 场景模式分支判断 ··········· 读: useSceneModeStore
             │
             ├── [autonomous] DroneControlPanel
-            │   └── sendCommand() ········· 写: publish /control
+            │   ├── sendCommand() ········· 写: publish /control
+            │   ├── handleAbort() ········· 写: publish /control + /stop_waypoint_exec
+            │   ├── LoadProjectDialog ····· prop: projectList (from useWaypointStore)
+            │   └── isExecuting 禁用 ······· 读: useWaypointStore.execStates
+            │
+            ├── [autonomous + hasWaypoints] WaypointExecPanel (条件渲染)
+            │   ├── 只读航点表格 ··········· 读: useWaypointStore.tables[droneId].waypoints
+            │   ├── Execute 按钮 ·········· 写: publish /start_waypoint_exec
+            │   ├── Clear 按钮 ··········· 写: publish /clear_waypoints
+            │   └── 执行状态 ·············· 读: useWaypointStore.execStates[droneId]
             │
             └── [mapping] WaypointPanel
                 ├── 实时位置显示 ··········· 读: useWaypointStore.latestOdom
@@ -274,6 +285,10 @@ Workspace (根组件)
 │    SceneSelectionDialog      │  │    projectLists:               │
 │    → setSceneMode()          │  │      Record<droneId, string[]> │
 │                              │  │      (per-drone 航点项目名列表)  │
+│                              │  │    execStates:                 │
+│                              │  │      Record<droneId,           │
+│                              │  │        "idle"|"executing">     │
+│                              │  │      (per-drone 航线执行状态)    │
 │  读取者:                      │  │                                │
 │    Interactions              │  │  写入者:                        │
 │    (分支: DroneControl       │  │    ThreeDeeRender              │
@@ -283,6 +298,9 @@ Workspace (根组件)
 │                              │  │    → setProjectList(droneId)   │
 │                              │  │      [/drone_{id}_waypoint_    │
 │                              │  │       project_list 消息拦截]    │
+│                              │  │    → setExecState(droneId)     │
+│                              │  │      [/drone_{id}_waypoint_    │
+│                              │  │       exec_state 消息拦截]      │
 │                              │  │    WaypointPanel               │
 │                              │  │    → addWaypoint()             │
 │                              │  │    → removeWaypoint()          │
@@ -298,6 +316,12 @@ Workspace (根组件)
 │                              │  │    SaveProjectDialog (prop)    │
 │                              │  │    LoadProjectDialog (prop)    │
 │                              │  │    ManageProjectsDialog (prop) │
+│                              │  │    DroneControlPanel           │
+│                              │  │    → execStates[droneId]       │
+│                              │  │    → projectLists[droneId]     │
+│                              │  │    WaypointExecPanel           │
+│                              │  │    → tables[droneId].waypoints │
+│                              │  │    → execStates[droneId]       │
 └──────────────────────────────┘  └────────────────────────────────┘
 
 数据流方向:
@@ -306,6 +330,7 @@ Workspace (根组件)
   ThreeDeeRender ──odom拦截──► useWaypointStore ──读取──► WaypointPanel
   ThreeDeeRender ──marker拦截──► useWaypointStore.setWaypointsFromMarkers(droneId, ...)
   ThreeDeeRender ──projectList拦截──► useWaypointStore.setProjectList(droneId, list) ──prop──► Dialogs
+  ThreeDeeRender ──execState拦截──► useWaypointStore.setExecState(droneId, state) ──读取──► DroneControlPanel / WaypointExecPanel
   WaypointPanel ──读取projectLists[droneId]──► 通过 prop 传递给 Save/Load/Manage Dialogs
 ```
 
@@ -323,6 +348,7 @@ Workspace (根组件)
                     │  stores/useSceneModeStore.ts             │
                     │  stores/useWaypointStore.ts              │
                     │  components/DroneControlPanel.tsx        │
+                    │  components/WaypointExecPanel.tsx        │
                     │  components/WaypointPanel.tsx            │
                     │  components/SceneSelectionDialog.tsx     │
                     │  components/SaveProjectDialog.tsx        │
@@ -381,8 +407,9 @@ Workspace (根组件)
                     │    +GoalSet advertise/publish  (新增逻辑)  │
                     │    +waypoint 颜色覆盖拦截      (新增逻辑)  │
                     │    +projectList 消息拦截       (新增逻辑)  │
-                    │    +odom 消息拦截 → Store       (新增逻辑)  │
-                    │    +GoalSet advertise/publish  (新增逻辑)  │
+                    │    +execState 消息拦截         (新增逻辑)  │
+                    │    +订阅重构: marker/projectList  (重构)   │
+                    │    +  从 mapping-only 提升到所有模式       │
                     │    +publishDroneIdRef 锁定      (新增逻辑)  │
                     │                                         │
                     │  settings.ts                             │
@@ -460,28 +487,34 @@ Workspace (根组件)
    │ │ Return / Stop  ││       │ │ Record / Delete     │  │
    │ │ Continue       ││       │ │ Z 轴调整            │  │
    │ │ Publish Pose   ││       │ │ MarkerArray 发布     │  │
-   │ └────────────────┘│       │ └────────────────────┘  │
-   │                    │       │                        │
-   │ 发布:               │       │ 发布 (per-drone):       │
-   │  /control (cmd)    │       │  /drone_{id}_waypoint_  │
-   │  /goal_with_id     │       │    markers              │
-   │  (GoalSet)         │       │  /drone_{id}_save_      │
-   └────────────────────┘       │    waypoints            │
-                                │  /drone_{id}_load_      │
-                                │    waypoints            │
-                                │  /drone_{id}_delete_    │
-                                │    waypoint_project     │
-                                │  /drone_{id}_reorder_   │
-                                │    waypoints            │
-                                │                        │
-                                │ ThreeDeeRender 额外行为: │
-                                │  +odom topic 动态订阅    │
-                                │  +odom 消息拦截→Store    │
-                                │  +per-drone waypoint_   │
-                                │    markers 颜色覆盖拦截  │
-                                │  +per-drone projectList │
-                                │    (regex 订阅) 拦截     │
+   │ │ Load Path      ││       │ └────────────────────┘  │
+   │ └────────────────┘│       │                        │
+   │                    │       │ 发布 (per-drone):       │
+   │ WaypointExecPanel │       │  /drone_{id}_waypoint_  │
+   │ (条件: hasWaypoints)│      │    markers              │
+   │ ┌────────────────┐│       │  /drone_{id}_save_      │
+   │ │ 航点表格 (只读) ││       │    waypoints            │
+   │ │ Execute / Clear││       │  /drone_{id}_load_      │
+   │ └────────────────┘│       │    waypoints            │
+   │                    │       │  /drone_{id}_delete_    │
+   │ 发布:               │       │    waypoint_project     │
+   │  /control (cmd)    │       │  /drone_{id}_reorder_   │
+   │  /goal_with_id     │       │    waypoints            │
+   │  (GoalSet)         │       │                        │
+   │  /drone_{id}_start │       │ ThreeDeeRender 额外行为: │
+   │   _waypoint_exec   │       │  +odom topic 动态订阅    │
+   │  /drone_{id}_stop  │       │  +odom 消息拦截→Store    │
+   │   _waypoint_exec   │       │  +per-drone waypoint_   │
+   │  /drone_{id}_load  │       │    markers 颜色覆盖拦截  │
+   │   _waypoints       │       │  +per-drone projectList │
+   └────────────────────┘       │    (regex 订阅) 拦截     │
                                 └────────────────────────┘
+
+   ThreeDeeRender 所有模式共享行为:
+    +waypoint_markers 正则订阅 + 颜色覆盖拦截
+    +waypoint_project_list 正则订阅 + JSON 解析拦截
+    +waypoint_exec_state 正则订阅 + 状态拦截
+    +battery 遥测订阅
 ```
 
 ---
@@ -497,7 +530,7 @@ Workspace (根组件)
                      └─────────────┘
 
   ┌───────────────────────────────────────────────────────────────┐
-  │                 Topic 映射表 (droneTopics 15 字段)              │
+  │                 Topic 映射表 (droneTopics 18 字段)              │
   │                                                               │
   │  BASE_TOPICS              droneTopics("1")                    │
   │  ─────────────            ──────────────────────────────────  │
@@ -522,6 +555,9 @@ Workspace (根组件)
   │  waypoint_markers    ──►  /drone_1_waypoint_markers           │
   │  waypoint_project_   ──►  /drone_1_waypoint_project_list      │
   │    list                                                       │
+  │  start_waypoint_exec ──►  /drone_1_start_waypoint_exec        │
+  │  stop_waypoint_exec  ──►  /drone_1_stop_waypoint_exec         │
+  │  waypoint_exec_state ──►  /drone_1_waypoint_exec_state        │
   └───────────────────────────────────────────────────────────────┘
 
   ┌───────────────────────────────────────────────────────────────┐
@@ -622,16 +658,19 @@ Workspace (根组件)
 | WebSocket 健康监控 | Y | Y | 共享 |
 | SceneSelectionDialog | Y | Y | 共享 (启动时) |
 | defaultLayout 锁定布局 | Y | Y | 共享 |
-| DroneControlPanel (飞行指令) | **Y** | N | **差异** |
+| Per-drone waypoint_markers 正则订阅 + 颜色覆盖 | Y | Y | 共享 |
+| Per-drone waypoint_project_list 正则订阅 | Y | Y | 共享 |
+| Per-drone waypoint_exec_state 正则订阅 | Y | Y | 共享 |
+| Per-drone battery 遥测订阅 | Y | Y | 共享 |
+| lastDroneIdRef 持久化选中 (两种模式) | Y | Y | 共享 |
+| DroneControlPanel (飞行指令 + Load Path + Stop 双通道) | **Y** | N | **差异** |
+| WaypointExecPanel (航线执行面板, 条件渲染) | **Y** | N | **差异** |
 | GoalSet 发布 (/goal_with_id) | **Y** | N | **差异** |
 | WaypointPanel (航点录制) | N | **Y** | **差异** |
 | Odom 拦截 → Store | N | **Y** | **差异** |
-| Per-drone MarkerArray 发布 (/drone_{id}_waypoint_markers) | N | **Y** | **差异** |
-| 颜色覆盖拦截 (WAYPOINT_COLORS, per-drone regex) | N | **Y** | **差异** |
+| Per-drone MarkerArray 发布 (前端 publish) | N | **Y** | **差异** |
 | 项目管理 (Save/Load/Delete/Manage, per-drone topics) | N | **Y** | **差异** |
 | 拖拽排序 (DraggableWaypointRow) | N | **Y** | **差异** |
-| Per-drone projectList (regex 订阅 + store 按 droneId) | N | **Y** | **差异** |
-| lastDroneIdRef 持久化选中 | N | **Y** | **差异** |
 
 **分支点**：`Interactions.tsx` 中根据 `useSceneModeStore.sceneMode` 的值决定渲染哪个面板。
 
@@ -648,8 +687,12 @@ Workspace (根组件)
 | 飞行控制 | UI 按钮 → publish /control cmd | flight_manager 接收并执行 |
 | 目标设置 | 3D 点击 → GoalSet → /goal_with_id | ego_replan_fsm 接收并规划轨迹 |
 | 轨迹规划 | — | EGO-Planner 避障 + 最优轨迹生成 |
-| 航点录制 | odom 拦截 → Z 调整 → 存储 | — |
-| 航点可视化 | MarkerArray → /drone_{id}_waypoint_markers + 颜色覆盖 | 3D Panel 自身渲染 (回环) |
-| 航点项目持久化 | Dialog UI + per-drone topic 发布 (save/load/delete/reorder) | waypoint_recorder 磁盘存储 + 列表推送 (每机独立实例, ~drone_id 参数) |
+| 航点录制 | odom 拦截 → Z 调整 → publish PoseStamped | waypoint_recorder 接收 + 维护列表 |
+| 航点可视化 | marker 拦截 → 颜色覆盖 → 渲染 | waypoint_recorder 发布 MarkerArray |
+| 航点项目持久化 | Dialog UI + per-drone topic 发布 | waypoint_recorder 磁盘 JSON + 列表推送 |
+| 航线加载 | LoadProjectDialog → publish load_waypoints | waypoint_recorder 读 JSON → 发布 markers |
+| 航线执行 | WaypointExecPanel → publish start/stop | waypoint_recorder 状态机 + 逐点 GoalSet |
+| 执行状态显示 | execState Store → UI 禁用控制 | waypoint_recorder 发布 exec_state |
+| 急停保护 | handleAbort() 双通道: cmd=5 + stop_exec | flight_manager 急停 + waypoint_recorder 停执行 |
 | 定位 (SLAM) | — | Visual SLAM 输出 Odometry + TF |
 | TF 广播 | camera followTf 跟随 | odom_visualization 广播 world→base{id} |

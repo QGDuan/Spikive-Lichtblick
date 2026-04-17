@@ -5,6 +5,9 @@
 // License, v2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/
 
+// Spikive: global CSS overrides to hide native Lichtblick UI chrome
+import "@lichtblick/suite-base/spikive/styles/spikiveGlobalOverrides.css";
+
 import { AppSetting } from "@lichtblick/suite-base";
 import { Storage } from "@lichtblick/suite-desktop/src/common/types";
 import { main as rendererMain } from "@lichtblick/suite-desktop/src/renderer/index";

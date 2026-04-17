@@ -709,17 +709,29 @@ export const WAYPOINT_COLORS = {
 | 项目保存 | **不支持** | SaveProjectDialog → `/drone_{id}_save_waypoints` |
 | 项目加载 | **不支持** | LoadProjectDialog → `/drone_{id}_load_waypoints` |
 | 项目管理 | **不支持** | ManageProjectsDialog → `/drone_{id}_delete_waypoint_project` |
-| 导航状态机 | NAV_IDLE → NAV_SENDING → NAV_WAITING → NAV_DONE | **尚未实现** |
-| 发送航点 | `_send_waypoint()` → GoalSet | **尚未实现** |
-| DroneState 监听 | `/drone_{id}_state` | **尚未实现** |
+| 导航状态机 | NAV_IDLE → NAV_SENDING → NAV_WAITING → NAV_DONE | `exec_state` "idle"/"executing" + `_nav_tick()` 5Hz (后端) |
+| 发送航点 | `_send_waypoint()` → cmd=4 + GoalSet | WaypointExecPanel → `start_waypoint_exec` → 后端 `_send_waypoint()` |
+| DroneState 监听 | `/drone_{id}_state` | 后端订阅 → `drone_tookoff`/`drone_reached` 条件检查 |
+| 执行状态发布 | 内部 tkinter label | `/drone_{id}_waypoint_exec_state` latched → ThreeDeeRender 拦截 |
+| 急停保护 | Stop 按钮 (仅 tkinter) | handleAbort() 双通道: cmd=5 + stop_waypoint_exec |
 
 ### 功能差异总结
+
+Python 版独有（新版本不支持）：
+
+- **tkinter GUI** — 新版本使用 Lichtblick Web 前端替代
+- **动态 odom topic 选择** — 新版本使用固定 `drone_{id}_` 前缀
+- **Continue 导航** — 从当前航点恢复 (`_continue_navigation()`)
+- **飞控重启** — `rosrun mavros mavcmd long 246` (Reboot FC 按钮)
 
 已超越 Python 版本的功能：
 
 - **拖拽排序** — Python 版无此能力
 - **项目持久化** — 命名保存 / 加载 / 批量删除
 - **品牌色覆盖** — 统一的 Spikive 视觉标识
+- **多机隔离** — per-drone topic 前缀，各机独立 waypoint_recorder 实例
+- **执行安全守护** — 前端 UI 禁用 + 后端 `_check_exec_guard` 双重保护
+- **Web 远程访问** — 浏览器端操作，无需桌面环境
 - **单实例多机路由** — 前端使用 `droneTopics(droneId)` 动态构建 topic，无需为每架无人机启动独立实例
 
 仍待实现的 Python 版功能：

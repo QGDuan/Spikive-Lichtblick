@@ -82,3 +82,21 @@ export function migrateV0WorkspaceState(
   };
   return migrated;
 }
+
+// Spikive: v1→v2 migration — force left sidebar to "robots" + open
+// When upgrading from stock Lichtblick, persisted sidebar state may reference
+// items like "topics" or "panel-settings" that don't exist in Spikive's
+// reduced leftSidebarItems map (which only contains "robots").
+export function migrateV1WorkspaceState(v1State: WorkspaceContextStore): WorkspaceContextStore {
+  return {
+    ...v1State,
+    sidebars: {
+      left: {
+        item: "robots",
+        open: true,
+        size: v1State.sidebars.left.size,
+      },
+      right: v1State.sidebars.right,
+    },
+  };
+}

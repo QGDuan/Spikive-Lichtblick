@@ -361,7 +361,7 @@ export function RendererOverlay(props: Props): React.JSX.Element {
         }
       </div>
       {props.interfaceMode === "3d" && (
-        <div className={classes.topLeft}>
+        <div className={classes.topLeft} data-testid="spikive-hide-3d-toolbar">
           <Paper square={false} elevation={4} style={{ display: "flex", flexDirection: "row" }}>
             <Tooltip
               placement="bottom"

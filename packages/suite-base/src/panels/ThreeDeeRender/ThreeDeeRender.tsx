@@ -40,6 +40,7 @@ import {
 import { useDroneTelemetryStore } from "@lichtblick/suite-base/spikive/stores/useDroneTelemetryStore";
 import { useSceneModeStore } from "@lichtblick/suite-base/spikive/stores/useSceneModeStore";
 import { useWaypointStore } from "@lichtblick/suite-base/spikive/stores/useWaypointStore";
+import { useVisualizationStore } from "@lichtblick/suite-base/spikive/stores/useVisualizationStore";
 import ThemeProvider from "@lichtblick/suite-base/theme/ThemeProvider";
 
 import type { IRenderer, ImageModeConfig, RendererConfig, RendererSubscription } from "./IRenderer";
@@ -368,6 +369,56 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
       renderRef.current.needsRender = true;
     }
   }, [topics, renderer]);
+
+  // Spikive: apply visualization settings from Zustand store into the renderer.
+  // Uses individual selectors to avoid unnecessary re-renders when unrelated store fields change.
+  const vizDecayTime = useVisualizationStore((s) => s.decayTime);
+  const vizColorMode = useVisualizationStore((s) => s.colorMode);
+  const vizColorMap = useVisualizationStore((s) => s.colorMap);
+  const vizExplicitAlpha = useVisualizationStore((s) => s.explicitAlpha);
+  const vizPointSize = useVisualizationStore((s) => s.pointSize);
+  useEffect(() => {
+    if (!renderer) {
+      return;
+    }
+
+    const patch = {
+      decayTime: vizDecayTime,
+      colorMode: vizColorMode,
+      colorMap: vizColorMap,
+      explicitAlpha: vizExplicitAlpha,
+      pointSize: vizPointSize,
+    };
+
+    // Apply to ALL point cloud topics (all drones share the same visualization style)
+    const pcTopicNames = (renderer.topics ?? [])
+      .filter((t) => t.name.endsWith("_cloud_registered"))
+      .map((t) => t.name);
+
+    if (pcTopicNames.length === 0) {
+      pcTopicNames.push(TOPIC_CONFIG.subscribe.pointCloud);
+    }
+
+    // Batch update config (single immer produce)
+    renderer.updateConfig((draft) => {
+      for (const name of pcTopicNames) {
+        draft.topics[name] = { ...draft.topics[name], ...patch };
+      }
+    });
+
+    // Refresh existing PointCloud renderables by calling handleSettingsAction directly
+    // on the extension (bypasses SettingsManager tree walk which may fail if nodes aren't registered)
+    const pcExt = renderer.sceneExtensions.get("foxglove.PointClouds");
+    if (pcExt) {
+      for (const name of pcTopicNames) {
+        // Trigger with any field — handleSettingsAction reads the full merged config internally
+        pcExt.handleSettingsAction({
+          action: "update",
+          payload: { path: ["topics", name, "pointSize"], value: vizPointSize, input: "number" },
+        } as SettingsTreeAction);
+      }
+    }
+  }, [renderer, vizDecayTime, vizColorMode, vizColorMap, vizExplicitAlpha, vizPointSize]);
 
   // Tell the renderer if we are connected to a ROS data source
   useEffect(() => {

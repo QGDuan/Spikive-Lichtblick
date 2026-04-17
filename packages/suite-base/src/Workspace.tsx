@@ -39,6 +39,7 @@ import {
 import { MultiRobotSidebar } from "@lichtblick/suite-base/components/MultiRobotSidebar";
 import { SceneSelectionDialog } from "@lichtblick/suite-base/spikive/components/SceneSelectionDialog";
 import { ThemeToggleButton } from "@lichtblick/suite-base/spikive/components/ThemeToggleButton";
+import { SpikiveTitleBar } from "@lichtblick/suite-base/spikive/components/SpikiveTitleBar";
 import { PanelCatalog } from "@lichtblick/suite-base/components/PanelCatalog";
 import PanelLayout from "@lichtblick/suite-base/components/PanelLayout";
 import PanelSettings from "@lichtblick/suite-base/components/PanelSettings";
@@ -520,7 +521,7 @@ function WorkspaceContent(props: WorkspaceProps): React.JSX.Element {
       <SyncAdapters />
       <KeyListener global keyDownHandlers={keyDownHandlers} />
       <div className={classes.container} ref={containerRef} tabIndex={0}>
-        {appBar}
+        <SpikiveTitleBar />
         <Sidebars
           selectedKey=""
           onSelectKey={() => {}}
@@ -531,7 +532,7 @@ function WorkspaceContent(props: WorkspaceProps): React.JSX.Element {
           onSelectLeftKey={sidebarActions.left.selectItem}
           leftSidebarSize={leftSidebarSize}
           setLeftSidebarSize={sidebarActions.left.setSize}
-          leftHeaderActions={<ThemeToggleButton />}
+          leftHeaderActions={undefined}
           rightItems={rightSidebarItems}
           selectedRightKey={rightSidebarOpen ? rightSidebarItem : undefined}
           onSelectRightKey={sidebarActions.right.selectItem}

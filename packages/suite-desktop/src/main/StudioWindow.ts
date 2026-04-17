@@ -50,11 +50,14 @@ function getWindowBackgroundColor(): string | undefined {
   return theme.background?.default;
 }
 
+// Spikive: thinner title bar (32px instead of default 44px)
+const SPIKIVE_TITLEBAR_HEIGHT = 32;
+
 function getTitleBarOverlayOptions(): TitleBarOverlayOptions {
   const theme = palette[nativeTheme.shouldUseDarkColors ? "dark" : "light"];
   if (!isMac) {
     return {
-      height: APP_BAR_HEIGHT,
+      height: SPIKIVE_TITLEBAR_HEIGHT,
       color: theme.appBar.main,
       symbolColor: theme.appBar.text,
     };

@@ -15,7 +15,10 @@ import {
   WorkspaceContext,
   WorkspaceContextStore,
 } from "@lichtblick/suite-base/context/Workspace/WorkspaceContext";
-import { migrateV0WorkspaceState } from "@lichtblick/suite-base/context/Workspace/migrations";
+import {
+  migrateV0WorkspaceState,
+  migrateV1WorkspaceState,
+} from "@lichtblick/suite-base/context/Workspace/migrations";
 
 /**
  * Creates the default initial state for the workspace store.
@@ -73,8 +76,14 @@ function createWorkspaceContextStore(
   return createStore<WorkspaceContextStore>()(
     persist(stateCreator, {
       name: SESSION_STORAGE_LICHTBLICK_WORKSPACE,
-      version: 1,
-      migrate: migrateV0WorkspaceState,
+      version: 2,
+      migrate: (persistedState: unknown, version: number) => {
+        let state = migrateV0WorkspaceState(persistedState, version);
+        if (version < 2) {
+          state = migrateV1WorkspaceState(state);
+        }
+        return state;
+      },
       partialize: (state) => {
         // Note that this is an opt-in list of keys from the store that we
         // include and restore when persisting to and from localStorage.

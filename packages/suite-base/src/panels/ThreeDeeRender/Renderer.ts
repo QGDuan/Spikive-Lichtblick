@@ -967,14 +967,16 @@ export class Renderer extends EventEmitter<RendererEvents> implements IRenderer 
       this.outlineMaterial.needsUpdate = true;
       this.instancedOutlineMaterial.color.set(DARK_OUTLINE);
       this.instancedOutlineMaterial.needsUpdate = true;
-      this.#selectionBackdrop.setColor(DARK_BACKDROP, 0.8);
+      // Spikive: reduce backdrop opacity so selected objects highlight
+      // without dimming/hiding the rest of the scene
+      this.#selectionBackdrop.setColor(DARK_BACKDROP, 0.2);
     } else {
       this.gl.setClearColor(bgColor ?? LIGHT_BACKDROP);
       this.outlineMaterial.color.set(LIGHT_OUTLINE);
       this.outlineMaterial.needsUpdate = true;
       this.instancedOutlineMaterial.color.set(LIGHT_OUTLINE);
       this.instancedOutlineMaterial.needsUpdate = true;
-      this.#selectionBackdrop.setColor(LIGHT_BACKDROP, 0.8);
+      this.#selectionBackdrop.setColor(LIGHT_BACKDROP, 0.2);
     }
   }
 
@@ -1629,10 +1631,8 @@ export class Renderer extends EventEmitter<RendererEvents> implements IRenderer 
     // TF frame axes have no topic — default to non-pickable unless explicitly opted in
     const settingsPath = renderable.userData.settingsPath;
     if (settingsPath[0] === "transforms" && settingsPath[1] != undefined) {
-      const frameKey = settingsPath[1] as string;
-      const frameSettings = this.config.transforms[frameKey] as
-        | Partial<BaseSettings>
-        | undefined;
+      const frameKey = settingsPath[1];
+      const frameSettings = this.config.transforms[frameKey] as Partial<BaseSettings> | undefined;
       if (frameSettings?.pickable !== true) {
         return false;
       }

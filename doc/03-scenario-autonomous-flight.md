@@ -8,7 +8,8 @@
 - [4. DroneControlPanel 生命周期（图 12）](#4-dronecontrolpanel-生命周期图-12)
 - [5. 各阶段详解](#5-各阶段详解)
 - [6. 后端处理链路](#6-后端处理链路)
-- [7. 已知问题](#7-已知问题)
+- [7. 航线加载与执行](#7-航线加载与执行)
+- [8. 已知问题](#8-已知问题)
 
 ---
 
@@ -19,9 +20,11 @@
 1. 用户在 SceneSelectionDialog 选择「自主飞行」
 2. 通过 MultiRobotSidebar 添加并激活目标无人机
 3. 在 3D 面板中点选机器人模型 → 弹出 DroneControlPanel
-4. 发送飞行指令（Takeoff/Land/Return/Stop/Continue）
+4. 发送飞行指令（Takeoff/Land/Return/Stop）
 5. 使用 Publish Pose 工具在 3D 空间中点击目标位置
 6. 系统自动发布 GoalSet 消息 → EGO-Planner 生成避障轨迹 → 无人机自主导航
+7. 加载建图打点场景保存的航点项目，一键执行自动逐点导航航线
+8. 执行中所有修改操作（Load/Clear/Publish Pose）自动禁用，Stop 双通道急停
 
 ---
 
@@ -186,11 +189,23 @@
                    │        msgs/cmd",   │
                    │       {datatypes}   │
                    │     );              │
+                   │     advertise(      │
+                   │       topics.load   │
+                   │       Waypoints,    │
+                   │       "std_msgs/    │
+                   │        String",     │
+                   │     );              │
+                   │     advertise(      │
+                   │       topics.stop   │
+                   │       WaypointExec, │
+                   │       "std_msgs/    │
+                   │        Empty",      │
+                   │     );              │
                    │     return () =>    │
                    │       unadvertise(  │
-                   │         "/control"  │
+                   │         ...3 topics │
                    │       );            │
-                   │   }, []);           │
+                   │   }, [topics]);     │
                    └─────────┬───────────┘
                              │
                              ▼
@@ -204,23 +219,24 @@
      │ 飞行指令按钮  │ │ Publish  │ │ 点击空白区域           │         │
      │              │ │ Pose 按钮│ │                      │         │
      │ sendCommand()│ │          │ │ selectedRenderable   │         │
-     │ publish(     │ │ 触发     │ │ = undefined          │         │
-     │  "/control", │ │ Publish  │ │                      │         │
-     │  {cmd: N}    │ │ Click    │ └──────────┬───────────┘         │
-     │ )            │ │ Tool     │            │                     │
+     │ publish(     │ │ disabled │ │ = undefined          │         │
+     │  "/control", │ │ when     │ │                      │         │
+     │  {cmd: N}    │ │ isExec   │ └──────────┬───────────┘         │
+     │ )            │ │          │            │                     │
      └──────┬───────┘ └────┬─────┘            ▼                     │
             │              │       ┌────────────────────┐           │
-            │              │       │   React unmount    │           │
-            └──────────────┘       │                    │           │
-                   │               │   unadvertise(    │           │
-                   │               │     "/control"    │           │
-                   └───────────────┤   )               │           │
-                   继续等待操作     │                    │           │
-                   ────────────────►└────────────────────┘           │
-                                                                    │
-                   ┌────────────────────────────────────────────┐   │
-                   │ 切换到其他机器人 (新 droneId)                │   │
-                   │   unmount 旧 panel → mount 新 panel        │───┘
+     ┌──────┴───────┐      │       │   React unmount    │           │
+     │ Stop 按钮     │      │       │                    │           │
+     │ handleAbort() │      │       │   unadvertise(    │           │
+     │ ├── cmd=5     │      │       │     ...3 topics   │           │
+     │ └── stop_exec │      │       │   )               │           │
+     └──────┬───────┘      │       └────────────────────┘           │
+            │              │                                         │
+            └──────────────┘  继续等待操作                           │
+                   ─────────────────────────────────────────────────┘
+                   ┌────────────────────────────────────────────┐
+                   │ 切换到其他机器人 (新 droneId)                │───┘
+                   │   unmount 旧 panel → mount 新 panel        │
                    │   (advertise/unadvertise 自动重新执行)       │
                    └────────────────────────────────────────────┘
 ```
@@ -347,9 +363,86 @@
 
 ---
 
-## 7. 已知问题
+## 7. 航线加载与执行
 
-### 7.1 首次 Publish Pose 失败
+自主飞行模式扩展了航线加载与自动逐点执行功能。详细设计文档见 [06-scenario-waypoint-execution.md](./06-scenario-waypoint-execution.md)。
+
+### 7.1 航线加载流程
+
+```text
+用户操作 Load Path 按钮
+  │
+  ▼
+DroneControlPanel 打开 LoadProjectDialog
+  │ projectList 从 useWaypointStore.projectLists[droneId] 读取
+  │ (由 ThreeDeeRender 从 /drone_{id}_waypoint_project_list 拦截填充)
+  │
+  ▼ 用户选择项目名称
+DroneControlPanel.handleLoad(name)
+  │ publish("/drone_{id}_load_waypoints", { data: name })
+  │
+  ▼ Foxglove Bridge → ROS1
+waypoint_recorder.py._load_waypoints_cb()
+  │ 读取 JSON 文件 → self.waypoints = data.waypoints
+  │ 调用 _publish_markers() → MarkerArray
+  │
+  ▼ Foxglove Bridge → 前端
+ThreeDeeRender 消息拦截 (/drone_\d+_waypoint_markers)
+  │ 颜色覆盖 (SPHERE→橙, TEXT→白, LINE→紫)
+  │ 解析 sphere markers → waypoints 列表
+  │ setWaypointsFromMarkers(droneId, waypoints)
+  │
+  ▼ Zustand Store 更新
+useWaypointStore.tables[droneId].waypoints 更新
+  │
+  ▼ Interactions.tsx 响应
+hasWaypoints = true
+  │
+  ▼ 渲染 WaypointExecPanel(droneId)
+     只读航点表格 + Execute/Clear 按钮
+```
+
+### 7.2 DroneControlPanel 新增行为 (Commit 11)
+
+| 功能 | 说明 |
+| --- | --- |
+| `execState` 读取 | `useWaypointStore(s => s.execStates[droneId] ?? "idle")` |
+| `projectList` 读取 | `useWaypointStore(s => s.projectLists[droneId] ?? [])` |
+| Load Path 按钮 | 打开 `LoadProjectDialog`，执行中 `disabled={isExecuting}` |
+| Publish Pose 禁用 | 执行中 `disabled={isExecuting}` |
+| `handleAbort()` | Stop 按钮双通道: `sendCommand(STOP)` + `publish(topics.stopWaypointExec, {})` |
+| Advertise 扩展 | mount 时额外 advertise `loadWaypoints` + `stopWaypointExec` |
+
+### 7.3 WaypointExecPanel 条件渲染
+
+```text
+Interactions.tsx:
+  activeDroneId = droneId ?? lastDroneIdRef.current  (两种模式都持久化)
+  hasWaypoints = useWaypointStore(tables[activeDroneId]?.waypoints.length > 0)
+
+  渲染逻辑:
+    isMapping ? <WaypointPanel>
+              : <>
+                  <DroneControlPanel>
+                  {hasWaypoints && <WaypointExecPanel droneId={activeDroneId} />}
+                </>
+```
+
+### 7.4 执行中 UI 禁用矩阵
+
+| UI 元素 | 执行中状态 | 原因 |
+| --- | --- | --- |
+| Execute 按钮 | `disabled` | 防止重复发送 start |
+| Clear 按钮 | `disabled` | 防止清空正在飞的航线 |
+| Load Path 按钮 | `disabled` | 防止换路线 |
+| Publish Pose 按钮 | `disabled` | 防止手动发点干扰自动导航 |
+| Stop 按钮 | **始终可用** | 紧急停止必须随时可达 |
+
+---
+
+## 8. 已知问题
+
+### 8.1 首次 Publish Pose 失败
 
 **现象**: 第一次使用 Publish Pose 工具点击目标位置时，GoalSet 消息不会被 ROS 端接收。
 
@@ -359,7 +452,7 @@
 
 **建议修复**: 在 `advertise()` 后添加确认回调或延迟，确保 publisher 注册完成再允许 publish。
 
-### 7.2 切换机器人后缓存残留
+### 8.2 切换机器人后缓存残留
 
 **现象**: 连接新机器人后，3D Panel 仍显示旧 topic 的数据。
 
@@ -367,7 +460,7 @@
 
 **临时解决**: 手动清除浏览器缓存。
 
-### 7.3 Publish Pose 坐标系错误
+### 8.3 Publish Pose 坐标系错误
 
 **现象**: 发布的 GoalSet 目标点坐标与 3D 面板中点击的位置不一致。
 
