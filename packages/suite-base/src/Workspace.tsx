@@ -21,7 +21,6 @@ import Logger from "@lichtblick/log";
 import { AppSetting } from "@lichtblick/suite-base/AppSetting";
 import { useStyles } from "@lichtblick/suite-base/Workspace.style";
 import AccountSettings from "@lichtblick/suite-base/components/AccountSettingsSidebar/AccountSettings";
-import { AppBar } from "@lichtblick/suite-base/components/AppBar";
 import {
   DataSourceDialog,
   DataSourceDialogItem,
@@ -38,7 +37,6 @@ import {
 } from "@lichtblick/suite-base/components/MessagePipeline";
 import { MultiRobotSidebar } from "@lichtblick/suite-base/components/MultiRobotSidebar";
 import { SceneSelectionDialog } from "@lichtblick/suite-base/spikive/components/SceneSelectionDialog";
-import { ThemeToggleButton } from "@lichtblick/suite-base/spikive/components/ThemeToggleButton";
 import { SpikiveTitleBar } from "@lichtblick/suite-base/spikive/components/SpikiveTitleBar";
 import { PanelCatalog } from "@lichtblick/suite-base/components/PanelCatalog";
 import PanelLayout from "@lichtblick/suite-base/components/PanelLayout";
@@ -139,7 +137,6 @@ function WorkspaceContent(props: WorkspaceProps): React.JSX.Element {
   const rightSidebarItem = useWorkspaceStore(selectWorkspaceRightSidebarItem);
   const rightSidebarOpen = useWorkspaceStore(selectWorkspaceRightSidebarOpen);
   const rightSidebarSize = useWorkspaceStore(selectWorkspaceRightSidebarSize);
-  const { AppBarComponent = AppBar } = props;
 
   const play = useMessagePipeline(selectPlay);
   const playUntil = useMessagePipeline(selectPlayUntil);
@@ -477,34 +474,6 @@ function WorkspaceContent(props: WorkspaceProps): React.JSX.Element {
   }, [playerPresence, seek, unappliedTime]);
 
   useSeekTimeFromCLI();
-
-  const appBar = useMemo(
-    () => (
-      <AppBarComponent
-        leftInset={props.appBarLeftInset}
-        onDoubleClick={props.onAppBarDoubleClick}
-        showCustomWindowControls={props.showCustomWindowControls}
-        isMaximized={props.isMaximized}
-        initialZoomFactor={props.initialZoomFactor}
-        onMinimizeWindow={props.onMinimizeWindow}
-        onMaximizeWindow={props.onMaximizeWindow}
-        onUnmaximizeWindow={props.onUnmaximizeWindow}
-        onCloseWindow={props.onCloseWindow}
-      />
-    ),
-    [
-      AppBarComponent,
-      props.appBarLeftInset,
-      props.isMaximized,
-      props.initialZoomFactor,
-      props.onAppBarDoubleClick,
-      props.onCloseWindow,
-      props.onMaximizeWindow,
-      props.onMinimizeWindow,
-      props.onUnmaximizeWindow,
-      props.showCustomWindowControls,
-    ],
-  );
 
   useBroadcast({
     play,

@@ -5,7 +5,6 @@ import { Rocket24Regular, Settings24Regular } from "@fluentui/react-icons";
 import { IconButton, Tooltip, Typography } from "@mui/material";
 import { makeStyles } from "tss-react/mui";
 import { useState } from "react";
-import Stack from "@lichtblick/suite-base/components/Stack";
 import { SpikiveSettingsDialog } from "@lichtblick/suite-base/spikive/components/SpikiveSettingsDialog";
 
 const SPIKIVE_TITLEBAR_HEIGHT = 32;
