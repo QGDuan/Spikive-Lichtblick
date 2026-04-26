@@ -9,7 +9,7 @@
 - [5. Z 轴调整逻辑流程（图 16）](#5-z-轴调整逻辑流程图-16)
 - [6. WaypointPanel 生命周期](#6-waypointpanel-生命周期)
 - [7. MarkerArray 可视化](#7-markerarray-可视化)
-- [8. lastDroneIdRef 持久化机制](#8-lastdroneidref-持久化机制)
+- [8. activeDroneId 持久化机制](#8-activedroneid-持久化机制)
 - [9. 航点项目管理（图 19）](#9-航点项目管理图-19)
 - [10. 拖拽排序机制（图 20）](#10-拖拽排序机制图-20)
 - [11. 前端颜色覆盖机制（图 21）](#11-前端颜色覆盖机制图-21)
@@ -441,31 +441,28 @@ WaypointPanel UI 布局:
 
 ---
 
-## 8. lastDroneIdRef 持久化机制
+## 8. activeDroneId 持久化机制
 
-**问题**: 建图打点模式下，用户点击空白区域后 `selectedRenderable` 变为 `undefined`，导致 WaypointPanel 消失。用户正在录制航点时，这是不可接受的。
+**问题**: 建图打点模式下，用户点击空白区域或点云/航点 marker 时，不能让 WaypointPanel 因为 selected object 改变而丢失当前控制目标。
 
 **解决方案** (Interactions.tsx):
 
 ```text
-  const lastDroneIdRef = useRef<string | undefined>(undefined);
+  activeDroneId = useRobotConnectionsStore(s => s.activeDroneId)
 
-  // 从选中对象提取 droneId
-  const droneId = topic ? extractDroneIdFromTopic(topic) : undefined;
+  卡片 Select:
+    setActiveDroneId(robot.droneId)
 
-  // 有新的 droneId 时更新 ref
-  if (droneId != undefined) {
-    lastDroneIdRef.current = droneId;
-  }
+  3D robotModel selected object:
+    topic = selectedObject.interactionData.topic
+    droneId = extractDroneIdFromRobotModelTopic(topic)
+    if droneId exists: setActiveDroneId(droneId)
 
-  // 建图模式: 使用 ref 持久化
-  const isMapping = sceneMode === "mapping-waypoint";
-  const activeDroneId = droneId ?? (isMapping ? lastDroneIdRef.current : undefined);
-
-  // 效果:
-  //   autonomous 模式: 点击空白 → activeDroneId = undefined → 面板消失 ✓
-  //   mapping 模式:    点击空白 → activeDroneId = lastDroneIdRef → 面板保持 ✓
+  空白、点云、轨迹、路径、航点 marker:
+    不写 activeDroneId
 ```
+
+`activeDroneId` 是唯一选择/控制目标。`selected_id`、marker `id`、`idFromMessage()` 和 `renderable.name` 只属于渲染对象层，不能参与建图打点的 drone id 推导。
 
 ---
 
@@ -795,16 +792,8 @@ Python 版独有（新版本不支持）：
 - 评估多数据源并行推流的可行性（当前为单活跃模型）
 - 优化连接状态机，区分 "未连接" / "连接中" / "已连接" / "重连中" 状态
 
-### 14.4 AstroManager 集成
+### 14.4 后端启动控制
 
-**现状**: 地面站仅负责可视化和指令发送，无法管控机载软件栈的运行状态。
+**现状**: 当前 Spikive-Lichtblick 前端不集成后端节点生命周期管理。侧边栏只负责连接健康、默认可视化、Select 控制目标，不显示后端 Manager 状态，也不发布 Manager 命令。
 
-**计划**:
-
-- 通过 AstroManager (Spikive-Manager) 服务接口，从地面站控制机器人后端模块：
-  - 启动 / 重启 Visual SLAM
-  - 启动 / 重启 EGO-Planner
-  - 启动 / 重启驱动 (px4ctrl / 电机驱动)
-  - 启动 / 重启 flight_manager
-- 监听各模块运行状态 (running / stopped / error)，在侧边栏 RobotCard 中显示
-- 实现远程日志查看和错误诊断
+**计划**: 若后续重新引入后端启动控制，需要单独设计，不应复用 Select/Visual 的 `activeDroneId` 入口，也不能让后端状态刷新触发 3D routing 或卡片 active 改变。

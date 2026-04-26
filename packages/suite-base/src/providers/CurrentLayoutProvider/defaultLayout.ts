@@ -8,6 +8,9 @@
 import { LayoutData } from "@lichtblick/suite-base/context/CurrentLayoutContext/actions";
 import { defaultPlaybackConfig } from "@lichtblick/suite-base/providers/CurrentLayoutProvider/reducers";
 import { TOPIC_CONFIG } from "@lichtblick/suite-base/spikive/config/topicConfig";
+import { useVisualizationStore } from "@lichtblick/suite-base/spikive/stores/useVisualizationStore";
+
+const vizDefaults = useVisualizationStore.getState();
 
 /**
  * Overridden default layout that may have been provided when self-hosting via Docker
@@ -67,11 +70,11 @@ export const defaultLayout: LayoutData =
             visible: true,
             pickable: false,
             colorField: "intensity",
-            colorMode: "colormap",
-            colorMap: "rainbow",
-            decayTime: 60,
-            explicitAlpha: 0.15,
-            pointSize: 0.5,
+            colorMode: vizDefaults.colorMode,
+            colorMap: vizDefaults.colorMap,
+            decayTime: vizDefaults.decayTime,
+            explicitAlpha: vizDefaults.explicitAlpha,
+            pointSize: vizDefaults.pointSize,
           },
           [TOPIC_CONFIG.subscribe.optimalTrajectory]: {
             visible: true,

@@ -41,7 +41,7 @@
 - **Topic 命名规范**：`/drone_{id}_{base_topic}`（如 `/drone_1_cloud_registered`）
 - **TF 帧命名**：`base{id}`（如 `base1`）
 - **路由函数**：`droneTopics(id)` 输入一个 ID，输出完整的 18 个 topic 路径（含航点管理和执行相关 topic）
-- 切换活跃无人机时，通过 `useActiveDroneRouting` hook 重写 3D Panel 的全部 topic 订阅
+- 切换可视化无人机时，通过 `useActiveDroneRouting` hook 重写 3D Panel 的核心 topic 订阅；当前单机模式添加第一张卡片后默认可视化
 
 ### 1.4 Zustand 单向数据流
 
@@ -89,14 +89,14 @@
 
 通信模型：
   地面站 ──── 1:N WebSocket ────► 每架无人机独立运行 Foxglove Bridge
-  每次只有一架无人机处于"活跃"状态（Topic 订阅指向该机）
+  每次只有一架无人机处于"可视化"状态（Topic 订阅指向该机）
   其余无人机保持连接但不推流数据
 ```
 
 **关键设计决策**：
 - 每架无人机独立运行 Foxglove Bridge 实例，地面站通过 WebSocket 直连
-- 当前架构为单活跃无人机模型：同一时间只有一架无人机的数据被 3D Panel 订阅
-- 切换活跃无人机通过 Topic 重映射实现，无需断开/重连 WebSocket
+- 当前架构为单可视化无人机模型：同一时间只有一架无人机的数据被 3D Panel 订阅
+- 切换可视化无人机通过 Topic 重映射实现，无需断开/重连 WebSocket
 
 ---
 
@@ -130,8 +130,10 @@
 ║                                                                        ║
 ║  ┌────────────────────── Zustand Stores ─────────────────────────────┐ ║
 ║  │  useRobotConnectionsStore  │  useSceneModeStore  │ useWaypointStore│ ║
-║  │  (机器人连接状态)            │  (场景模式)          │ (航点数据)      │ ║
-║  └────────────────────────────┴────────────────────┴─────────────────┘ ║
+║  │  (连接 + Select/Visual)      │  (场景模式)          │ (航点数据)      │ ║
+║  │  useDroneTelemetryStore    │  useVisualizationStore              │ ║
+║  │  (电池/GPS 遥测)             │  (点云/背景/渲染设置)                 │ ║
+║  └───────────────────────────────────────────────────────────────────┘ ║
 ╚═══════════════════════════════════════╤══════════════════════════════════╝
                                         │
                          Foxglove Bridge WebSocket (ws://IP:8765)
@@ -141,6 +143,11 @@
 ║                                                                        ║
 ║  ┌────────────────┐  ┌────────────────┐  ┌────────────────────────┐   ║
 ║  │ foxglove_bridge │  │ flight_manager │  │ ego_replan_fsm         │   ║
+║  │ (WS↔ROS 桥接)   │  │ (/control路由)  │  │ (轨迹规划 + 避障)       │   ║
+║  └───────┬────────┘  └───────┬────────┘  └───────┬────────────────┘   ║
+║          │                   │                    │                    ║
+║  ┌───────┴───────────────────┴────────────────────┴──────────────┐    ║
+║  │                      ROS Topic 网络                            │    ║
 ║  │ (WS↔ROS 桥接)   │  │ (/control路由)  │  │ (轨迹规划 + 避障)       │   ║
 ║  └───────┬────────┘  └───────┬────────┘  └───────┬────────────────┘   ║
 ║          │                   │                    │                    ║
@@ -190,13 +197,13 @@ Workspace (根组件)
 │   ├── ThemeToggleButton ················· 读/写: AppSetting.COLOR_SCHEME
 │   │
 │   └── MultiRobotSidebar ················ 读: useRobotConnectionsStore
-│       ├── RobotCard (×N)                  写: setActive / toggleVisibility / removeRobot
+│       ├── RobotCard (×N)                  写: setActiveDroneId / removeRobot
 │       │   └── 状态灯 + 延迟 + 操作按钮     读: useWebSocketMonitor (latency)
 │       │
 │       ├── AddRobotDialog                  写: addRobot (probeWebSocket 预检)
 │       │
-│       ├── useActiveDroneRouting() ······· 读: activeRobot.droneId
-│       │   └── 重写 3D Panel 的 topic 订阅   写: currentLayoutActions.setTopics()
+│       ├── useActiveDroneRouting() ······· 读: visualDroneId
+│       │   └── 重写 3D Panel 的 topic 订阅   写: currentLayoutActions.savePanelConfigs()
 │       │
 │       └── useWebSocketMonitor() ········· 写: updateStatus(latencyMs)
 │
@@ -257,20 +264,22 @@ Workspace (根组件)
 │                                                                     │
 │  State:                                                             │
 │    robots: RobotEntry[]                                             │
-│    ├── id, droneId, url, status, latencyMs, isActive, isVisible     │
+│    ├── connectionId, droneId, url, status, latencyMs, errorMessage  │
+│    activeDroneId                                                    │
+│    visualDroneId / visualConnectionId / visualRouteVersion          │
 │                                                                     │
 │  写入者 (Actions):                          读取者 (Subscribers):    │
 │    AddRobotDialog → addRobot()              MultiRobotSidebar       │
 │    RobotCard      → removeRobot()           RobotCard (×N)          │
-│    RobotCard      → setActive()             useActiveDroneRouting   │
-│    RobotCard      → toggleVisibility()      useWebSocketMonitor     │
+│    RobotCard      → setActiveDroneId()      useActiveDroneRouting   │
+│    Interactions   → setActiveDroneId()      useWebSocketMonitor     │
 │    useWebSocketMonitor → updateStatus()                             │
 └─────────────────────────────────────────────────────────────────────┘
          │                                              │
          │ (无直接依赖，通过 hook 层协调)                    │
          │                                              │
-         │  useActiveDroneRouting 监听 activeRobot       │
-         │  的 droneId 变化 → 重写 3D Panel topic 配置     │
+         │  useActiveDroneRouting 监听 visualDroneId      │
+         │  变化 → 重写 3D Panel topic 配置                 │
          ▼                                              ▼
 ┌──────────────────────────────┐  ┌────────────────────────────────┐
 │    useSceneModeStore          │  │     useWaypointStore            │
@@ -605,9 +614,9 @@ Workspace (根组件)
   └───────────────────────────────────────────────────────────────┘
 
   ┌───────────────────────────────────────────────────────────────┐
-  │          Topic 切换流程 (切换活跃无人机, 6 字段路由)               │
-  │                                                               │
-  │  useActiveDroneRouting 监测到 activeRobot.droneId 变化:        │
+  │          Topic 切换流程 (切换可视化无人机, 6 字段路由)             │
+│                                                               │
+  │  useActiveDroneRouting 监测到 visualDroneId 变化:              │
   │                                                               │
   │  TOPIC_FIELDS (6 字段):                                        │
   │    pointCloud, optimalTrajectory, goalPoint,                  │
@@ -662,7 +671,7 @@ Workspace (根组件)
 | Per-drone waypoint_project_list 正则订阅 | Y | Y | 共享 |
 | Per-drone waypoint_exec_state 正则订阅 | Y | Y | 共享 |
 | Per-drone battery 遥测订阅 | Y | Y | 共享 |
-| lastDroneIdRef 持久化选中 (两种模式) | Y | Y | 共享 |
+| 单一 activeDroneId 选择/控制目标 | Y | Y | 共享 |
 | DroneControlPanel (飞行指令 + Load Path + Stop 双通道) | **Y** | N | **差异** |
 | WaypointExecPanel (航线执行面板, 条件渲染) | **Y** | N | **差异** |
 | GoalSet 发布 (/goal_with_id) | **Y** | N | **差异** |
@@ -696,3 +705,5 @@ Workspace (根组件)
 | 急停保护 | handleAbort() 双通道: cmd=5 + stop_exec | flight_manager 急停 + waypoint_recorder 停执行 |
 | 定位 (SLAM) | — | Visual SLAM 输出 Odometry + TF |
 | TF 广播 | camera followTf 跟随 | odom_visualization 广播 world→base{id} |
+
+> 当前 Spikive-Lichtblick 前端不再集成 AstroManager 的状态订阅、Start/Restart 按钮或 Manager store。外部后端仓库可继续存在，但本仓库的前端职责只保留可视化、连接健康、飞控、GoalSet 和航点闭环。

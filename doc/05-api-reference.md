@@ -132,6 +132,8 @@
 | `droneTopics(droneId: string \| number)` | `function → DroneTopics` | 输入 drone_id，返回所有 18 个完整 topic 路径映射 (含 `/drone_{id}_` 前缀) |
 | `droneBodyFrame(droneId: string \| number)` | `function → string` | 输入 drone_id，返回 TF 帧名 `"base{id}"` |
 | `extractDroneIdFromTopic(topic: string)` | `function → string \| undefined` | 从 topic 路径提取 drone_id |
+| `extractDroneIdFromRobotModelTopic(topic)` | `function → string \| undefined` | 只从 `/drone_{id}_odom_visualization/robot` 提取 drone_id |
+| `isDroneRobotModelTopic(topic)` | `function → boolean` | 判断 topic 是否为唯一可选中的 robotModel topic |
 | `TELEMETRY_TOPICS` | `object` | 遥测 topic: `{ battery: "/mavros/battery" }` |
 | `CONTROL_TOPIC` | `string` ("/control") | 飞行指令发布 topic |
 | `DRONE_COMMANDS` | `object` | `{ TAKEOFF: 1, LAND: 2, RETURN: 3, CONTINUE: 4, STOP: 5 }` |
@@ -140,7 +142,7 @@
 
 > **注意**: `PROJECT_TOPICS` 常量已移除。所有航点管理 topic (save/load/delete/reorder/markers/projectList) 现在通过 `droneTopics()` 生成 per-drone 前缀的 topic 名，不再使用全局常量。
 
-**DroneTopics 15 字段说明**:
+**DroneTopics 18 字段说明**:
 
 | 字段 | 生成的 topic 格式 | 用途 |
 | --- | --- | --- |
@@ -179,7 +181,9 @@ export const WAYPOINT_COLORS = {
 | --- | --- |
 | `droneTopics()` | `useActiveDroneRouting.ts`, `WaypointPanel.tsx`, `DroneControlPanel.tsx`, `WaypointExecPanel.tsx`, `defaultLayout.ts` |
 | `droneBodyFrame()` | `useActiveDroneRouting.ts`, `defaultLayout.ts` |
-| `extractDroneIdFromTopic()` | `Interactions.tsx`, `ThreeDeeRender.tsx`, `DroneControlPanel.tsx` |
+| `extractDroneIdFromTopic()` | `ThreeDeeRender.tsx`, `DroneControlPanel.tsx` |
+| `extractDroneIdFromRobotModelTopic()` | `Interactions.tsx`, `ThreeDeeRender.tsx` |
+| `isDroneRobotModelTopic()` | `Renderer.ts`, `defaultLayout.ts` |
 | `TELEMETRY_TOPICS` | `ThreeDeeRender.tsx` |
 | `CONTROL_TOPIC` | `DroneControlPanel.tsx` |
 | `DRONE_COMMANDS` | `DroneControlPanel.tsx` |
@@ -190,22 +194,23 @@ export const WAYPOINT_COLORS = {
 
 ### 2.2 useActiveDroneRouting.ts
 
-**路径**: `packages/suite-base/src/spikive/hooks/useActiveDroneRouting.ts` (209 行)
+**路径**: `packages/suite-base/src/spikive/hooks/useActiveDroneRouting.ts`
 
 **导出**:
 
 | 导出名 | 类型 | 说明 |
 | --- | --- | --- |
-| `useActiveDroneRouting()` | `hook → void` | 监听活跃机器人变化，自动重写 3D Panel topic 订阅 |
+| `useActiveDroneRouting()` | `hook → void` | 监听当前可视化目标，自动重写 3D Panel topic 订阅 |
+| `buildActiveDronePanelConfig()` | `(currentConfig, targetDroneId) → config \| undefined` | 纯函数，生成目标 drone 对应的 3D panel 配置；layout cache 和 mounted renderer 共用 |
 
 **内部常量**:
 
 | 常量 | 值 | 说明 |
 | --- | --- | --- |
-| `TOPIC_FIELDS` | `["pointCloud", "optimalTrajectory", "goalPoint", "robotModel", "path", "waypointMarkers"]` (6 项) | 所有参与路由重映射的 DroneTopics 字段，用于遍历 topic 对 |
+| `TOPIC_FIELDS` | `["pointCloud", "optimalTrajectory", "goalPoint", "robotModel", "path", "waypointMarkers"]` (6 项) | 单 active drone 3D 可视化核心 topic |
 | `NON_PICKABLE_FIELDS` | `Set<"pointCloud", "optimalTrajectory", "goalPoint", "path", "waypointMarkers">` | 不参与 GPU pick 的 topic 字段 (仅 robotModel 为 pickable)，包含 `waypointMarkers` |
 
-> **变更**: `TOPIC_FIELDS` 从 5 项扩展为 6 项，新增 `waypointMarkers`。该字段同时在 `NON_PICKABLE_FIELDS` 中标记为不可 pick。
+> **约束**: `useActiveDroneRouting()` 只订阅 `visualDroneId` 和 `visualRouteVersion`。卡片 Select 状态、WebSocket latency 更新不能触发 3D routing。
 
 **内部函数**:
 
@@ -213,6 +218,13 @@ export const WAYPOINT_COLORS = {
 | --- | --- | --- |
 | `ensurePickableFlags` | `(topics: Record, droneId: string) → patched \| undefined` | 确保新 topic 的 pickable 标记正确，返回修补后的配置或 undefined (无需修补) |
 | `remapTopics` | `(oldTopics: Record, fromId: string, toId: string) → Record` | 将 3D Panel 配置中的 topic 从 drone_fromId 重写为 drone_toId |
+| `ensureVisibleTargetTopics` | `(topics: Record, droneId: string) → { topics, changed }` | 补齐目标 drone 6 个核心 topic，强制 visible/pickable 契约，并移除其他 drone 的核心 3D topic |
+
+**两层路由同步**:
+
+- `useActiveDroneRouting()` 写 `configById["3D!spikive3d"]`，保证 layout cache 与后续 remount 正确。
+- `ThreeDeeRender.tsx` 在 mounted renderer 中直接调用同一份 `buildActiveDronePanelConfig()`，保证当前 3D panel 立即跟随 `visualDroneId`，不等待 panel remount。
+- 点云 topic 创建/修复时带完整渲染参数，并保持 `pickable: false`。
 
 **依赖**:
 
@@ -223,6 +235,38 @@ export const WAYPOINT_COLORS = {
 | `droneTopics`, `droneBodyFrame` | `topicConfig.ts` |
 
 **调用位置**: `MultiRobotSidebar/index.tsx` 中调用 `useActiveDroneRouting()`
+
+---
+
+### 2.2.1 Active Drone ID
+
+**路径**: `packages/suite-base/src/components/MultiRobotSidebar/types.ts` 与 `useRobotConnections.ts`
+
+**ID 边界**:
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `connectionId` | `string` | 前端连接/卡片实例 id，用于 React key、删除卡片、WebSocket probe 状态 |
+| `droneId` | `string` | 业务身份，用于 ROS topic、TF、Waypoint store、GoalSet |
+| `activeDroneId` | `string \| undefined` | 当前选择和控制目标 |
+| `visualDroneId` | `string \| undefined` | 当前 3D 显示和路由目标；当前单机模式添加第一张卡片时默认开启 |
+| `visualRouteVersion` | `number` | 低频路由校验版本 |
+
+**Active 写入**:
+
+| action | 来源 | 行为 |
+| --- | --- | --- |
+| `setActiveDroneId(droneId)` | 卡片右上角 Select 按钮 | 设置唯一选择/控制目标 `activeDroneId` |
+| `setActiveDroneId(droneId)` | 3D robotModel selected object | 从 `/drone_{id}_odom_visualization/robot` 解析 `droneId` 后写入同一个 active |
+
+**约束**:
+
+- SelectObject、控制面板、航点面板和 GoalSet 只读 `activeDroneId`。
+- 高频点云、marker、odom 消息循环不能 dispatch active intent。
+- 点云、轨迹、路径、航点 marker 不能成为 active 入口。
+- `selected_id`、marker `id`、`idFromMessage()`、`renderable.name` 不能推导业务 `droneId`。
+- 点云 visualization settings 只在 visual/config/settings 变化时同步到 visual/config 中的点云 topic，不能在 renderer topics 尚未 ready 时默认覆盖 drone 1。
+- 当前单机模式下卡片 Visual 按钮默认开启且禁用，只表达显示状态，不参与 Select/active intent。
 
 ---
 
@@ -555,15 +599,14 @@ export const WAYPOINT_COLORS = {
 type ConnectionStatus = "connecting" | "connected" | "slow" | "disconnected" | "error";
 
 interface RobotEntry {
-  id: string;           // 内部唯一 ID (UUID)
-  droneId: string;      // 用户输入的 drone_id (如 "1")
-  url: string;          // WebSocket URL (如 "ws://192.168.1.10:8765")
+  connectionId: string; // 前端连接/卡片实例 ID
+  droneId: string;      // 唯一业务 drone_id (如 "1")
+  url: string;          // WebSocket URL
   status: ConnectionStatus;
   latencyMs?: number;   // WebSocket 握手延迟
-  isActive: boolean;    // 是否为当前活跃机器人
-  isVisible: boolean;   // 是否显示其数据
   errorMessage?: string;
 }
+
 ```
 
 ### 3.2 useRobotConnections.ts
@@ -575,6 +618,10 @@ interface RobotEntry {
 ```typescript
 {
   robots: RobotEntry[];
+  activeDroneId?: string;
+  visualDroneId?: string;
+  visualConnectionId?: string;
+  visualRouteVersion: number;
 }
 ```
 
@@ -583,12 +630,13 @@ interface RobotEntry {
 | Action | 说明 |
 | --- | --- |
 | `addRobot(url, droneId)` | 添加机器人 (URL 去尾斜杠标准化, 互斥检查: URL + droneId 唯一) |
-| `removeRobot(id)` | 移除机器人 |
-| `setActive(id)` | 设置活跃机器人 (排他: 其余全部 isActive=false) |
-| `toggleVisibility(id)` | 切换数据可见性 |
-| `updateStatus(id, status, latencyMs?)` | 更新连接状态和延迟 |
+| `removeRobot(connectionId)` | 移除连接/卡片；如果移除 active drone，则清空 active |
+| `setActiveDroneId(droneId)` | 统一处理卡片 Select、3D robotModel 等选择/控制目标变更 |
+| `updateStatus(connectionId, status, latencyMs?)` | 通过连接实例 ID 更新连接状态和延迟 |
 
-**内部函数**: `normalizeUrl(url)` — URL 标准化 (去尾斜杠); `generateId()` — UUID 生成
+**内部函数**: `normalizeUrl(url)` — URL 标准化 (去尾斜杠); `generateConnectionId()` — 前端连接实例 ID 生成
+
+> **ID 约束**: `connectionId` 不能拼 ROS topic，`droneId` 不能作为连接实例 key。SelectObject 面板只读 `activeDroneId`，不能从 `selected_id`、marker id 或 `renderable.name` 推 drone id。
 
 ### 3.3 useWebSocketMonitor.ts
 
@@ -616,9 +664,9 @@ interface RobotEntry {
 
 ### 3.5 RobotCard.tsx
 
-**Props**: `{ robot: RobotEntry, onSetActive, onToggleVisibility, onRemove }`
+**Props**: `{ robot: RobotEntry, isActive, onSelectDrone, onRemove }`
 
-**功能**: 状态指示灯 (绿/黄/红), 延迟显示 (ms), 活跃 Radio, 可见 Toggle, 删除确认
+**功能**: 状态指示灯 (绿/黄/红), 延迟显示 (ms), Select Radio, 默认开启但禁用的 Visual 图标, 删除确认
 
 ### 3.6 AddRobotDialog.tsx
 
@@ -688,11 +736,10 @@ interface RobotEntry {
 
 | 新增/修改 | 位置 | 说明 |
 | --- | --- | --- |
-| import | L27-31 | DroneControlPanel, WaypointExecPanel, WaypointPanel, extractDroneIdFromTopic, useSceneModeStore, useWaypointStore |
-| droneId 提取 | L77 | `extractDroneIdFromTopic(topic)` |
-| sceneMode 读取 | L78 | `useSceneModeStore(s => s.sceneMode)` |
-| lastDroneIdRef | L80-85 | 两种模式下都持久化选中的 droneId (不再限于 mapping) |
-| activeDroneId | L87-89 | `droneId ?? lastDroneIdRef.current` (两种模式统一回退) |
+| import | L27-31 | DroneControlPanel, WaypointExecPanel, WaypointPanel, extractDroneIdFromRobotModelTopic, useSceneModeStore, useWaypointStore |
+| droneId 提取 | L77 | 只从 robotModel topic 执行 `extractDroneIdFromRobotModelTopic(topic)` |
+| active 写入 | L90-94 | robotModel 选中后调用 `setActiveDroneId(droneId)`；非 robotModel 不写 active |
+| activeDroneId | L87 | SelectObject、控制、航点、GoalSet 只读 store 中的 `activeDroneId` |
 | hasWaypoints | L91-93 | `useWaypointStore(s => tables[activeDroneId]?.waypoints.length > 0)` |
 | maxHeight 条件 | L108 | `isMapping \|\| hasWaypoints ? undefined : 240` |
 | 条件渲染 | L110-135 | `isMapping ? <WaypointPanel> : <><DroneControlPanel/>{hasWaypoints && <WaypointExecPanel/>}</>` |
@@ -711,7 +758,7 @@ interface RobotEntry {
 
 全文重写为 Spikive 锁定布局：
 - Panel ID: `"3D!spikive3d"`
-- 5 个 topic 配置 + pickable 标记 (仅 robot model 为 pickable)
+- 6 个核心可视化 topic 配置 + pickable 标记 (仅 robot model 为 pickable)
 - Camera preset: 俯视角度，followTf = TOPIC_CONFIG.followTf
 - Publish 配置: topic 名称来自 TOPIC_CONFIG
 

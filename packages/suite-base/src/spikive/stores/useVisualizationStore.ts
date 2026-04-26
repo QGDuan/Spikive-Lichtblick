@@ -18,6 +18,14 @@ interface VisualizationState extends VisualizationSettings {
   updateSettings: (patch: Partial<VisualizationSettings>) => void;
 }
 
+const VISUALIZATION_SETTING_KEYS: (keyof VisualizationSettings)[] = [
+  "decayTime",
+  "colorMode",
+  "colorMap",
+  "explicitAlpha",
+  "pointSize",
+];
+
 export const useVisualizationStore = create<VisualizationState>()((set) => ({
   // Defaults: "中" performance + colormap rainbow
   decayTime: 45,
@@ -27,6 +35,13 @@ export const useVisualizationStore = create<VisualizationState>()((set) => ({
   pointSize: 0.5,
 
   updateSettings: (patch) => {
-    set(patch);
+    set((state) => {
+      const changed = VISUALIZATION_SETTING_KEYS.some((key) => {
+        const nextValue = patch[key];
+        return nextValue != undefined && state[key] !== nextValue;
+      });
+
+      return changed ? patch : state;
+    });
   },
 }));

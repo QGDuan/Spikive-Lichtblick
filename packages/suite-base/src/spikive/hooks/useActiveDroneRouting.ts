@@ -3,14 +3,16 @@
 
 import { useEffect, useRef } from "react";
 
-import { useCurrentLayoutActions } from "@lichtblick/suite-base/context/CurrentLayoutContext";
 import { useRobotConnectionsStore } from "@lichtblick/suite-base/components/MultiRobotSidebar/useRobotConnections";
+import { useCurrentLayoutActions } from "@lichtblick/suite-base/context/CurrentLayoutContext";
 import {
   droneBodyFrame,
   droneTopics,
   DEFAULT_DRONE_ID,
+  extractDroneIdFromRobotModelTopic,
   type DroneTopics,
 } from "@lichtblick/suite-base/spikive/config/topicConfig";
+import { useVisualizationStore } from "@lichtblick/suite-base/spikive/stores/useVisualizationStore";
 
 const PANEL_ID = "3D!spikive3d";
 
@@ -33,6 +35,85 @@ const NON_PICKABLE_FIELDS: ReadonlySet<keyof DroneTopics> = new Set([
   "waypointMarkers",
 ]);
 
+const CORE_DRONE_TOPIC_RE =
+  /^\/drone_(\d+)_(cloud_registered|ego_planner_node\/optimal_list|ego_planner_node\/goal_point|odom_visualization\/robot|odom_visualization\/path|waypoint_markers)$/;
+
+const DEFAULT_TOPIC_SETTINGS: Partial<Record<keyof DroneTopics, Record<string, unknown>>> = {
+  optimalTrajectory: { visible: true, pickable: false },
+  goalPoint: { visible: true, pickable: false },
+  robotModel: { visible: true },
+  path: { visible: true, pickable: false },
+  waypointMarkers: { visible: true, pickable: false },
+  odom: {},
+  addWaypoint: {},
+  removeWaypoint: {},
+  clearWaypoints: {},
+  saveWaypoints: {},
+  loadWaypoints: {},
+  deleteProject: {},
+  reorderWaypoints: {},
+  waypointProjectList: {},
+  startWaypointExec: {},
+  stopWaypointExec: {},
+  waypointExecState: {},
+};
+
+function defaultTopicSettings(field: keyof DroneTopics): Record<string, unknown> {
+  if (field === "pointCloud") {
+    const viz = useVisualizationStore.getState();
+    return {
+      visible: true,
+      pickable: false,
+      colorField: "intensity",
+      colorMode: viz.colorMode,
+      colorMap: viz.colorMap,
+      decayTime: viz.decayTime,
+      explicitAlpha: viz.explicitAlpha,
+      pointSize: viz.pointSize,
+    };
+  }
+
+  return DEFAULT_TOPIC_SETTINGS[field] ?? {};
+}
+
+function normalizeTopicSettings(
+  field: keyof DroneTopics,
+  existing: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const defaults = defaultTopicSettings(field);
+  const merged = { ...defaults, ...(existing ?? {}) };
+
+  merged.visible = true;
+
+  if (NON_PICKABLE_FIELDS.has(field)) {
+    merged.pickable = false;
+  } else if (field === "robotModel" && merged.pickable === false) {
+    delete merged.pickable;
+  }
+
+  return merged;
+}
+
+function topicSettingsEqual(
+  a: Record<string, unknown> | undefined,
+  b: Record<string, unknown>,
+): boolean {
+  if (a == undefined) {
+    return false;
+  }
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) {
+    return false;
+  }
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
  * Ensure every drone topic in `topics` has the correct `pickable` flag.
  * Returns a patched copy only if something changed, otherwise returns undefined.
@@ -53,11 +134,12 @@ function ensurePickableFlags(
     if (existing == undefined) {
       continue; // topic not in config yet, nothing to patch
     }
-    if (shouldBePickable && existing.pickable !== undefined) {
+    if (shouldBePickable && existing.pickable != undefined) {
       // robotModel shouldn't have pickable: false
       if (existing.pickable === false) {
-        patched[topicName] = { ...existing };
-        delete (patched[topicName] as Record<string, unknown>).pickable;
+        const patchedTopic = { ...existing };
+        delete patchedTopic.pickable;
+        patched[topicName] = patchedTopic;
         changed = true;
       }
     } else if (!shouldBePickable && existing.pickable !== false) {
@@ -105,29 +187,100 @@ function remapTopics(
   // Ensure all target topics exist (in case the old config was missing some).
   for (const field of TOPIC_FIELDS) {
     if (!(to[field] in result)) {
-      result[to[field]] = {
-        visible: true,
-        ...(field !== "robotModel" ? { pickable: false } : {}),
-      };
+      result[to[field]] = normalizeTopicSettings(field, undefined);
     }
   }
 
   return result;
 }
 
+function ensureVisibleTargetTopics(
+  topics: Record<string, unknown>,
+  droneId: string,
+): { topics: Record<string, unknown>; changed: boolean } {
+  const target = droneTopics(droneId);
+  let changed = false;
+  const result: Record<string, unknown> = {};
+
+  for (const [topicName, settings] of Object.entries(topics)) {
+    const match = CORE_DRONE_TOPIC_RE.exec(topicName);
+    if (match?.[1] != undefined && match[1] !== droneId) {
+      changed = true;
+      continue;
+    }
+    result[topicName] = settings;
+  }
+
+  for (const field of TOPIC_FIELDS) {
+    const topicName = target[field];
+    const existing = result[topicName] as Record<string, unknown> | undefined;
+    const normalized = normalizeTopicSettings(field, existing);
+    if (!topicSettingsEqual(existing, normalized)) {
+      result[topicName] = normalized;
+      changed = true;
+    }
+  }
+
+  return { topics: result, changed };
+}
+
+function inferDroneIdFromConfig(config: Record<string, unknown>): string {
+  const topics = config.topics as Record<string, unknown> | undefined;
+  if (topics != undefined) {
+    for (const topic of Object.keys(topics)) {
+      const droneId = extractDroneIdFromRobotModelTopic(topic);
+      if (droneId != undefined) {
+        return droneId;
+      }
+    }
+  }
+
+  const followTf = config.followTf;
+  if (typeof followTf === "string") {
+    const match = /^base(\d+)$/.exec(followTf);
+    if (match?.[1] != undefined) {
+      return match[1];
+    }
+  }
+
+  return DEFAULT_DRONE_ID;
+}
+
+export function buildActiveDronePanelConfig(
+  currentConfig: Record<string, unknown>,
+  targetDroneId: string,
+): Record<string, unknown> | undefined {
+  const fromId = inferDroneIdFromConfig(currentConfig);
+  const currentFollowTf = currentConfig.followTf;
+  const newFollowTf = droneBodyFrame(targetDroneId);
+  const needsFollowTfPatch = currentFollowTf !== newFollowTf;
+
+  const oldTopics = (currentConfig.topics ?? {}) as Record<string, unknown>;
+  const remappedTopics =
+    fromId === targetDroneId ? oldTopics : remapTopics(oldTopics, fromId, targetDroneId);
+  const { topics: newTopics, changed: topicsChanged } = ensureVisibleTargetTopics(
+    remappedTopics,
+    targetDroneId,
+  );
+
+  if (fromId === targetDroneId && !needsFollowTfPatch && !topicsChanged) {
+    return undefined;
+  }
+
+  return { ...currentConfig, topics: newTopics, followTf: newFollowTf };
+}
+
 /**
- * Watches the active robot's droneId in the Zustand store.
+ * Watches the visual robot's droneId in the Zustand store.
  * When it changes, rewrites the 3D Panel's topic subscriptions
  * and followTf to match the new drone.
  */
 export function useActiveDroneRouting(): void {
   const { savePanelConfigs, getCurrentLayoutState } = useCurrentLayoutActions();
 
-  const activeDroneId = useRobotConnectionsStore(
-    (s) => s.robots.find((r) => r.isActive)?.droneId,
-  );
+  const visualDroneId = useRobotConnectionsStore((s) => s.visualDroneId ?? s.robots[0]?.droneId);
+  const visualRouteVersion = useRobotConnectionsStore((s) => s.visualRouteVersion);
 
-  const prevDroneIdRef = useRef<string | undefined>(undefined);
   const patchedRef = useRef(false);
 
   // One-time patch: ensure pickable flags exist in cached layouts from older sessions
@@ -137,8 +290,11 @@ export function useActiveDroneRouting(): void {
     }
     patchedRef.current = true;
 
-    const droneId = activeDroneId ?? DEFAULT_DRONE_ID;
+    const droneId = visualDroneId ?? DEFAULT_DRONE_ID;
     const layoutState = getCurrentLayoutState();
+    // TypeScript correctly treats selectedLayout/data as optional here; layout
+    // actions can run before a layout has been hydrated.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     const currentConfig = layoutState.selectedLayout?.data?.configById?.[PANEL_ID] as
       | Record<string, unknown>
       | undefined;
@@ -159,31 +315,19 @@ export function useActiveDroneRouting(): void {
         ],
       });
     }
-  }, [activeDroneId, getCurrentLayoutState, savePanelConfigs]);
+  }, [visualDroneId, getCurrentLayoutState, savePanelConfigs]);
 
-  // Active drone switch: remap topics
+  // Visual drone switch: remap topics
 
   useEffect(() => {
-    if (activeDroneId == undefined) {
-      return;
-    }
-
-    const prevId = prevDroneIdRef.current;
-    if (prevId === activeDroneId) {
-      return;
-    }
-    prevDroneIdRef.current = activeDroneId;
-
-    // Determine what droneId the current panel config is based on.
-    // On first activation, the layout is initialized from DEFAULT_DRONE_ID.
-    const fromId = prevId ?? DEFAULT_DRONE_ID;
-
-    // If the target is the same as the source, no rewrite needed.
-    if (fromId === activeDroneId) {
+    if (visualDroneId == undefined) {
       return;
     }
 
     const layoutState = getCurrentLayoutState();
+    // TypeScript correctly treats selectedLayout/data as optional here; layout
+    // actions can run before a layout has been hydrated.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     const currentConfig = layoutState.selectedLayout?.data?.configById?.[PANEL_ID] as
       | Record<string, unknown>
       | undefined;
@@ -191,18 +335,19 @@ export function useActiveDroneRouting(): void {
       return;
     }
 
-    const oldTopics = (currentConfig.topics ?? {}) as Record<string, unknown>;
-    const newTopics = remapTopics(oldTopics, fromId, activeDroneId);
-    const newFollowTf = droneBodyFrame(activeDroneId);
+    const nextConfig = buildActiveDronePanelConfig(currentConfig, visualDroneId);
+    if (nextConfig == undefined) {
+      return;
+    }
 
     savePanelConfigs({
       configs: [
         {
           id: PANEL_ID,
           override: true,
-          config: { ...currentConfig, topics: newTopics, followTf: newFollowTf },
+          config: nextConfig,
         },
       ],
     });
-  }, [activeDroneId, savePanelConfigs, getCurrentLayoutState]);
+  }, [visualDroneId, visualRouteVersion, savePanelConfigs, getCurrentLayoutState]);
 }

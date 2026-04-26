@@ -4,7 +4,7 @@
 import AddIcon from "@mui/icons-material/Add";
 import SmartToyOutlinedIcon from "@mui/icons-material/SmartToyOutlined";
 import { Button, Typography } from "@mui/material";
-import { useCallback, useState } from "react";
+import React, { useCallback, useState } from "react";
 
 import { usePlayerSelection } from "@lichtblick/suite-base/context/PlayerSelectionContext";
 import { useActiveDroneRouting } from "@lichtblick/suite-base/spikive/hooks/useActiveDroneRouting";
@@ -61,9 +61,9 @@ export function MultiRobotSidebar(): React.JSX.Element {
   useWebSocketMonitor();
 
   const robots = useRobotConnectionsStore((s) => s.robots);
+  const activeDroneId = useRobotConnectionsStore((s) => s.activeDroneId);
   const addRobot = useRobotConnectionsStore((s) => s.addRobot);
-  const setActive = useRobotConnectionsStore((s) => s.setActive);
-  const toggleVisibility = useRobotConnectionsStore((s) => s.toggleVisibility);
+  const setActiveDroneId = useRobotConnectionsStore((s) => s.setActiveDroneId);
   const removeRobot = useRobotConnectionsStore((s) => s.removeRobot);
 
   const handleConnect = useCallback(
@@ -112,10 +112,10 @@ export function MultiRobotSidebar(): React.JSX.Element {
         ) : (
           robots.map((robot) => (
             <RobotCard
-              key={robot.id}
+              key={robot.connectionId}
               robot={robot}
-              onSetActive={setActive}
-              onToggleVisibility={toggleVisibility}
+              isActive={robot.droneId === activeDroneId}
+              onSelectDrone={setActiveDroneId}
               onRemove={removeRobot}
             />
           ))

@@ -275,7 +275,7 @@ export function RendererOverlay(props: Props): React.JSX.Element {
           scale: selection.renderable.scale,
           color: undefined,
           interactionData: {
-            topic: selection.renderable.name,
+            topic: selection.renderable.topic,
             highlighted: undefined,
             renderable: selection.renderable,
           },

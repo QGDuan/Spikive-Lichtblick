@@ -18,8 +18,8 @@
 自主飞行模式 (`autonomous-flight`) 是地面站的核心控制场景：
 
 1. 用户在 SceneSelectionDialog 选择「自主飞行」
-2. 通过 MultiRobotSidebar 添加并激活目标无人机
-3. 在 3D 面板中点选机器人模型 → 弹出 DroneControlPanel
+2. 通过 MultiRobotSidebar 添加目标无人机，3D Panel 默认显示第一张卡片对应的可视化数据
+3. 点击卡片 Select 或在 3D 面板中点选机器人模型 → 写入 `activeDroneId` 并弹出 DroneControlPanel
 4. 发送飞行指令（Takeoff/Land/Return/Stop）
 5. 使用 Publish Pose 工具在 3D 空间中点击目标位置
 6. 系统自动发布 GoalSet 消息 → EGO-Planner 生成避障轨迹 → 无人机自主导航
@@ -46,18 +46,19 @@
 │               addRobot(url, droneId)                                     │
 │                     │                                                    │
 │                     ▼                                                    │
-│  ③ 激活机器人  RobotCard.setActive()                                      │
+│  ③ 默认可视化  addRobot 初始化 visualDroneId                               │
 │  ──────────►  useActiveDroneRouting()                                    │
 │               remapTopics(oldId, newId)                                   │
 │               followTf = base{newId}                                     │
 │                     │                                                    │
 │                     ▼                                                    │
-│              3D Panel 订阅 5 个 topic:              Foxglove     ROS1      │
+│              3D Panel 订阅 6 个 topic:              Foxglove     ROS1      │
 │               /drone_{id}_cloud_registered    ◄───  Bridge  ◄── SLAM     │
 │               /drone_{id}_odom_vis/robot      ◄───  (WS)    ◄── odom_vis │
 │               /drone_{id}_odom_vis/path       ◄───           ◄──         │
 │               /drone_{id}_ego_planner/optimal  ◄──           ◄── planner │
 │               /drone_{id}_ego_planner/goal     ◄──           ◄──         │
+│               /drone_{id}_waypoint_markers     ◄──           ◄── waypoints│
 │                     │                                                    │
 │                     ▼                                                    │
 │              Renderer 渲染: 点云+模型+轨迹+航迹                             │
@@ -65,7 +66,7 @@
 │                     ▼                                                    │
 │  ④ 点选机器人  GPU Pick (pickable filter)                                  │
 │  ──────────►  → 仅机器人模型可被选中                                        │
-│               → extractDroneIdFromTopic(topic) = droneId                  │
+│               → extractDroneIdFromRobotModelTopic(topic) = droneId        │
 │                     │                                                    │
 │                     ▼                                                    │
 │              Interactions.tsx 分支:                                        │
@@ -254,19 +255,19 @@
 2. 成功 → `useRobotConnectionsStore.addRobot(url, droneId)`
    - 互斥检查: URL 唯一 + droneId 唯一
 3. `selectSource()` — 调用 Lichtblick 的 `PlayerSelection` API 建立 Foxglove 连接
-4. `setActive(robotId)` — 标记为活跃机器人
+4. 如果当前没有可视化目标，初始化 `visualDroneId = droneId`，但不自动写入 `activeDroneId`
 
 **关键文件**: `MultiRobotSidebar/index.tsx`, `AddRobotDialog.tsx`
 
 ### 5.2 Topic 订阅阶段
 
-**入口**: `useActiveDroneRouting()` 检测到 `activeRobot.droneId` 变化
+**入口**: `useActiveDroneRouting()` 检测到 `visualDroneId` 或 `visualRouteVersion` 变化
 
 **流程**:
 1. `remapTopics(fromId, toId)` — 重写 3D Panel 的 topics 配置
 2. `ensurePickableFlags()` — 确保新 topic 的 pickable 标记正确
 3. 更新 `followTf` = `base{toId}`
-4. Lichtblick 内核自动根据新配置重新订阅
+4. 同步修复 layout cache 和 mounted renderer config，避免当前 3D panel 等待 remount 才显示
 
 **关键文件**: `spikive/hooks/useActiveDroneRouting.ts`
 
@@ -287,7 +288,8 @@
 3. GPU ray pick — 仅对 visible (= pickable) 的 renderable 做射线检测
 4. 恢复被隐藏的 renderable
 5. `setSelectedRenderable()` — 设置选中对象
-6. `Interactions.tsx` 检测到 selectedRenderable 变化 → 渲染 DroneControlPanel
+6. `Interactions.tsx` 只在 selected object 是 robotModel topic 时调用 `setActiveDroneId(droneId)`
+7. `activeDroneId` 写入后渲染 DroneControlPanel；点云、轨迹、路径、航点 marker 不改变 active
 
 **关键文件**: `Renderer.ts`, `Interactions/Interactions.tsx`
 
@@ -314,14 +316,14 @@
 ```typescript
 // quadrotor_msgs/GoalSet
 {
-  drone_id: 1,        // int16, 从选中对象 topic 提取
+  drone_id: 1,        // int16, 来自 activeDroneId 或 robotModel topic
   goal: [1.5, 2.3, 1.0]  // float32[3], 用户点击的 3D 坐标
 }
 ```
 
 **发布 topic**: `/goal_with_id` (全局)
 
-**drone_id 锁定机制**: 在 Publish Pose 工具激活时 (`publishClickType` 变化)，通过 `Renderer.getSelectedRenderableInfo()` 获取当前选中对象的 topic，用 `extractDroneIdFromTopic()` 提取 droneId，存入 `publishDroneIdRef.current`。之后无论用户如何切换视角或选中其他对象，publish 时始终使用锁定的 droneId。
+**drone_id 锁定机制**: 在 Publish Pose 工具激活时 (`publishClickType` 变化)，优先从当前选中的 robotModel topic 解析 `droneId`，否则使用 `activeDroneId`，并存入 `publishDroneIdRef.current`。之后无论用户如何切换视角或选中其他对象，publish 时始终使用锁定的 droneId。
 
 ---
 
@@ -417,7 +419,7 @@ hasWaypoints = true
 
 ```text
 Interactions.tsx:
-  activeDroneId = droneId ?? lastDroneIdRef.current  (两种模式都持久化)
+  activeDroneId = useRobotConnectionsStore(s => s.activeDroneId)
   hasWaypoints = useWaypointStore(tables[activeDroneId]?.waypoints.length > 0)
 
   渲染逻辑:

@@ -104,6 +104,17 @@ export function extractDroneIdFromTopic(topic: string): string | undefined {
   return match?.[1];
 }
 
+/** Extract drone ID only from the robot model topic, the sole valid 3D selection source. */
+export function extractDroneIdFromRobotModelTopic(topic: string): string | undefined {
+  const match = /^\/drone_(\d+)_odom_visualization\/robot$/.exec(topic);
+  return match?.[1];
+}
+
+/** Return true when a topic is the pickable robot model topic. */
+export function isDroneRobotModelTopic(topic: string | undefined): boolean {
+  return topic != undefined && extractDroneIdFromRobotModelTopic(topic) != undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Telemetry topics (battery, GPS, etc.)
 // ---------------------------------------------------------------------------

@@ -476,7 +476,7 @@ useActiveDroneRouting 监测到 activeRobot 变化:
 | --- | --- |
 | `Workspace.tsx` | +import SceneSelectionDialog; +渲染启动阻塞对话框 |
 | `ThreeDeeRender.tsx` | +import sceneMode/waypointStore; +odom topic 动态订阅 (mapping 模式); +odom 消息正则拦截 → updateOdom() |
-| `Interactions.tsx` | +import WaypointPanel/useSceneModeStore; +场景模式条件分支渲染; +lastDroneIdRef 持久化 (mapping 模式下点击空白不丢失面板) |
+| `Interactions.tsx` | +import WaypointPanel/useSceneModeStore; +场景模式条件分支渲染; +旧版本地 ref 持久化 (mapping 模式下点击空白不丢失面板，当前已由 activeDroneId store 取代) |
 | `publish.ts` | +WaypointMarkerDatatypes (MarkerArray datatype 定义); +makeWaypointMarkerArray() 构造航点球体/编号/连线 |
 
 ### 数据流变更
@@ -756,7 +756,7 @@ export const WAYPOINT_COLORS = {
 1. **面板上下滚动** — 当航点数量超出可视区域时，WaypointPanel 不支持滚动，需要添加 overflow-y: auto 和固定高度容器
 2. **交互设计优化** — 打点 / 清空 / 加载等操作的用户确认流程和反馈可以更完善（如 toast 通知、操作撤回）
 3. **连接逻辑更新** — 当前 MultiRobotSidebar 的连接管理逻辑需要重构，以支持更稳定的重连和多数据源同时推流
-4. **AstroManager 集成** — 通过 AstroManager 控制机器人后端模块的启动 / 重启 / 状态监听 (SLAM, EGO-Planner, 驱动, flight_manager)，实现从地面站全面管控机载软件栈
+4. **后端启动控制** — 当前前端链路已移除。若后续重新引入后端节点启动 / 重启 / 状态监听，需要作为独立能力设计，不能让后端状态刷新写入 Select/Visual 的 active 或 routing 状态
 
 ---
 
@@ -801,7 +801,7 @@ export const WAYPOINT_COLORS = {
 | `topicConfig.ts` | +6 行 | 新增 `startWaypointExec`, `stopWaypointExec`, `waypointExecState` 3 个字段 (18 总字段) |
 | `useWaypointStore.ts` | +10 行 | 新增 `ExecState` 类型, `execStates` 状态, `setExecState()` action |
 | `DroneControlPanel.tsx` | +77 行 | +LoadProjectDialog 集成, +handleAbort() 双通道 Stop, +isExecuting 禁用逻辑 |
-| `Interactions.tsx` | +22 行 | +hasWaypoints 条件渲染 WaypointExecPanel, +lastDroneIdRef 两种模式持久化 |
+| `Interactions.tsx` | +22 行 | +hasWaypoints 条件渲染 WaypointExecPanel, +旧版本地 ref 两种模式持久化 (当前已由 activeDroneId store 取代) |
 | `ThreeDeeRender.tsx` | +125/-60 行 | 订阅与拦截重构: marker/projectList/execState 提升到所有模式, odom 保留 mapping-only |
 
 ### 数据流概要
@@ -904,3 +904,50 @@ SpikiveSettingsDialog
         → pcExt.handleSettingsAction() 刷新 renderable 材质/缓冲区
           → updatePointCloud() 重建 THREE.js 材质
 ```
+
+---
+
+## Current Stage: SelectObject 单一 activeDroneId 闭环
+
+**日期**: 2026-04-26
+
+### 设计目标
+
+1. SelectObject 面板、卡片 Select、3D robotModel 点击、控制、航点和 GoalSet 只围绕一个业务 id：`activeDroneId`
+2. 取消当前业务链路中的旧 active intent 与 active 元数据字段，避免第二套 active 判断
+3. 修复多对象点击菜单使用 `renderable.name` 当 topic 的风险，统一使用真实 `renderable.topic`
+4. 明确点云、轨迹、路径、航点 marker、`selected_id`、marker `id`、`idFromMessage()` 都不能推导 drone id
+
+### 修改概要
+
+| 文件/模块 | 变更 |
+| --- | --- |
+| `useRobotConnections.ts` | 新增唯一 active 写入 action `setActiveDroneId(droneId)`；相同值 no-op |
+| `RobotCard.tsx` | 卡片右上角 Select 直接调用 `setActiveDroneId(robot.droneId)` |
+| `Interactions.tsx` | 只从 robotModel topic 使用 `extractDroneIdFromRobotModelTopic()`，再写同一个 `activeDroneId` |
+| `RendererOverlay.tsx` | `clickedObjects` 与 `selectedObject` 都使用真实 `renderable.topic` |
+| `doc/drone-id-routing.md` / Skill | 固化 Select/Visual/id 边界和防误导规则 |
+
+### 当前闭环
+
+```text
+卡片 Select
+  -> setActiveDroneId(robot.droneId)
+
+3D robotModel click
+  -> selectedObject.interactionData.topic
+  -> extractDroneIdFromRobotModelTopic(topic)
+  -> setActiveDroneId(droneId)
+
+SelectObject / DroneControlPanel / WaypointPanel / GoalSet
+  -> read activeDroneId only
+
+PointCloud / Path / Trajectory / Waypoint marker / blank click
+  -> do not write activeDroneId
+```
+
+### 验证
+
+- `yarn build:packages`
+- `yarn web:build:dev`
+- 静态检查旧 active 接口、Manager 前端链路、SelectObject 通用 topic 提取和 `renderable.name` topic 来源

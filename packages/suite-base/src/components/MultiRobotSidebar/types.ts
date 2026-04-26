@@ -4,26 +4,27 @@
 export type ConnectionStatus = "connecting" | "connected" | "slow" | "disconnected" | "error";
 
 export type RobotEntry = {
-  id: string;
+  connectionId: string;
   droneId: string;
   url: string;
   status: ConnectionStatus;
   latencyMs?: number;
-  isActive: boolean;
-  isVisible: boolean;
   errorMessage?: string;
 };
 
 export type MultiRobotState = {
   robots: RobotEntry[];
+  activeDroneId?: string;
+  visualDroneId?: string;
+  visualConnectionId?: string;
+  visualRouteVersion: number;
 };
 
 export type MultiRobotActions = {
   addRobot: (url: string, droneId: string) => { success: boolean; error?: string };
-  removeRobot: (id: string) => void;
-  setActive: (id: string) => void;
-  toggleVisibility: (id: string) => void;
-  updateStatus: (id: string, status: ConnectionStatus, latencyMs?: number) => void;
+  removeRobot: (connectionId: string) => void;
+  setActiveDroneId: (droneId: string) => void;
+  updateStatus: (connectionId: string, status: ConnectionStatus, latencyMs?: number) => void;
 };
 
 export type MultiRobotStore = MultiRobotState & MultiRobotActions;

@@ -25,13 +25,15 @@ Spikive Ground Station 是一套面向多无人机 SLAM 建图、路径规划与
 
 ### 多机管理
 - 通过侧边栏添加/移除无人机（WebSocket 连接 + 健康监测）
-- 点击切换当前激活的无人机，所有 3D 交互自动路由到对应机器
-- 动态 Topic 路由：`/drone_{id}_*` 命名空间隔离，切换时实时重映射 5 类 Topic + TF 坐标系
+- 当前单机场景添加卡片后默认开启 3D 可视化；右上角 Select 单独决定控制目标
+- SelectObject 面板、飞控、航点和 GoalSet 只读同一个 `activeDroneId`；卡片 Select 与 3D robotModel 点击共用这一个 active
+- 动态 Topic 路由：`/drone_{id}_*` 命名空间隔离，可视化目标变化时同步重映射 6 类 Topic + TF 坐标系
+- `connectionId` 只管理卡片连接，`droneId` 只管理业务身份，`activeDroneId` 与 `visualDroneId` 分离
 
 ### 两种操作场景
 
 **自主飞行模式**
-- 在 3D 场景中点击无人机模型，弹出飞控面板（起飞/降落/返航/停止）
+- 点击卡片 Select 或 3D 无人机模型后，弹出飞控面板（起飞/降落/返航/停止）
 - 通过 Publish Pose 工具向 EGO-Planner 发送目标点，实时规划并执行
 - 加载建图打点场景保存的航点项目，一键执行自动逐点导航航线
 - Stop 按钮双通道急停：同时发送飞控 cmd=5 和后端 stop_waypoint_exec
@@ -57,7 +59,7 @@ Spikive Ground Station 是一套面向多无人机 SLAM 建图、路径规划与
 | 前端框架 | React 18 + TypeScript |
 | UI 组件 | Material-UI (MUI) |
 | 3D 渲染 | Three.js (Lichtblick 内置) |
-| 状态管理 | Zustand (3 个独立 Store) |
+| 状态管理 | Zustand（按连接、场景、航点、遥测、可视化等领域拆分） |
 | 通信协议 | Foxglove Bridge WebSocket (`ws://IP:8765`) |
 | 机器人框架 | ROS1 (Noetic) |
 | 构建工具 | Yarn Workspaces + Webpack |
@@ -168,7 +170,7 @@ docker run -p 8080:8080 spikive-ground-station
 | [建图打点场景](doc/04-scenario-mapping-waypoint.md) | Odom 拦截、MarkerArray 可视化、Z 轴逻辑、项目持久化 |
 | [API 参考](doc/05-api-reference.md) | Store API、ROS 消息格式、修改点清单 |
 | [航线执行场景](doc/06-scenario-waypoint-execution.md) | 航线加载、自动逐点导航、后端状态机 |
-| [Drone ID 路由](doc/drone-id-routing.md) | 路由架构深度解析 |
+| [Drone ID 路由](doc/drone-id-routing.md) | Select/Visual 边界、ID 管理、渲染效率与鲁棒性策略 |
 
 ## 架构原则
 

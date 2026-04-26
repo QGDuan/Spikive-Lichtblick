@@ -146,6 +146,21 @@ export default function PlayerManager(
 
   useLayoutEffect(() => void player?.setUserScripts(userScripts), [player, userScripts]);
 
+  // Cleanup player on page unload to prevent zombie WebSocket connections
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (basePlayer) {
+        basePlayer.close();
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [basePlayer]);
+
   const { enqueueSnackbar } = useSnackbar();
 
   const [selectedSource, setSelectedSource] = useState<IDataSourceFactory | undefined>();

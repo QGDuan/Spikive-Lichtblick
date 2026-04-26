@@ -16,7 +16,7 @@
 
 import { Cursor20Regular } from "@fluentui/react-icons";
 import { Typography } from "@mui/material";
-import { useRef } from "react";
+import React, { useEffect } from "react";
 
 import type { MessageDefinition } from "@lichtblick/message-definition";
 import type { LayoutActions } from "@lichtblick/suite";
@@ -24,10 +24,11 @@ import ExpandingToolbar, {
   ToolGroup,
   ToolGroupFixedSizePane,
 } from "@lichtblick/suite-base/components/ExpandingToolbar";
+import { useRobotConnectionsStore } from "@lichtblick/suite-base/components/MultiRobotSidebar/useRobotConnections";
 import { DroneControlPanel } from "@lichtblick/suite-base/spikive/components/DroneControlPanel";
 import { WaypointExecPanel } from "@lichtblick/suite-base/spikive/components/WaypointExecPanel";
 import { WaypointPanel } from "@lichtblick/suite-base/spikive/components/WaypointPanel";
-import { extractDroneIdFromTopic } from "@lichtblick/suite-base/spikive/config/topicConfig";
+import { extractDroneIdFromRobotModelTopic } from "@lichtblick/suite-base/spikive/config/topicConfig";
 import { useSceneModeStore } from "@lichtblick/suite-base/spikive/stores/useSceneModeStore";
 import { useWaypointStore } from "@lichtblick/suite-base/spikive/stores/useWaypointStore";
 
@@ -57,7 +58,11 @@ type Props = {
   publishActive: boolean;
   canPublish: boolean;
   publish?: (topic: string, message: unknown) => void;
-  advertise?: (topic: string, schemaName: string, options?: { datatypes: Map<string, MessageDefinition> }) => void;
+  advertise?: (
+    topic: string,
+    schemaName: string,
+    options?: { datatypes: Map<string, MessageDefinition> },
+  ) => void;
   unadvertise?: (topic: string) => void;
   dataSourceProfile?: string;
 };
@@ -76,23 +81,23 @@ const InteractionsBaseComponent = React.memo<Props>(function InteractionsBaseCom
 }: Props) {
   const selectedInteractionData = selectedObject?.object.interactionData;
   const topic = selectedInteractionData?.topic;
-  const droneId = topic != undefined ? extractDroneIdFromTopic(topic) : undefined;
+  const selectedRobotDroneId =
+    topic != undefined ? extractDroneIdFromRobotModelTopic(topic) : undefined;
   const sceneMode = useSceneModeStore((s) => s.sceneMode);
+  const activeDroneId = useRobotConnectionsStore((s) => s.activeDroneId);
+  const setActiveDroneId = useRobotConnectionsStore((s) => s.setActiveDroneId);
 
-  // Remember the last selected droneId so the panel persists
-  // when the user clicks empty space (selectedObject → undefined).
-  const lastDroneIdRef = useRef<string | undefined>(undefined);
-  if (droneId != undefined) {
-    lastDroneIdRef.current = droneId;
-  }
+  useEffect(() => {
+    if (selectedRobotDroneId != undefined) {
+      setActiveDroneId(selectedRobotDroneId);
+    }
+  }, [selectedRobotDroneId, setActiveDroneId]);
 
   const isMapping = sceneMode === "mapping-waypoint";
-  // In both modes, fall back to the remembered droneId when nothing is selected
-  const activeDroneId = droneId ?? lastDroneIdRef.current;
 
   // Check if waypoints are loaded for the active drone (used in autonomous-flight mode)
-  const hasWaypoints = useWaypointStore(
-    (s) => (activeDroneId ? (s.tables[activeDroneId]?.waypoints.length ?? 0) > 0 : false),
+  const hasWaypoints = useWaypointStore((s) =>
+    activeDroneId ? (s.tables[activeDroneId]?.waypoints.length ?? 0) > 0 : false,
   );
 
   return (

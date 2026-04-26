@@ -2,11 +2,9 @@
 // SPDX-License-Identifier: MPL-2.0
 
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
-import ExtensionIcon from "@mui/icons-material/Extension";
 import RadioButtonCheckedIcon from "@mui/icons-material/RadioButtonChecked";
 import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked";
 import VisibilityIcon from "@mui/icons-material/Visibility";
-import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import {
   Box,
   Button,
@@ -20,12 +18,12 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { useCallback, useState } from "react";
+import React, { useCallback, useState } from "react";
 
 import { BatteryIndicator } from "@lichtblick/suite-base/spikive/components/DroneStatusIndicators";
 
 import { useStyles } from "./RobotCard.style";
-import { ConnectionStatus, RobotEntry } from "./types";
+import type { ConnectionStatus, RobotEntry } from "./types";
 
 const STATUS_COLORS: Record<ConnectionStatus, string> = {
   connecting: "#FFA726",
@@ -37,27 +35,23 @@ const STATUS_COLORS: Record<ConnectionStatus, string> = {
 
 type RobotCardProps = {
   robot: RobotEntry;
-  onSetActive: (id: string) => void;
-  onToggleVisibility: (id: string) => void;
-  onRemove: (id: string) => void;
+  isActive: boolean;
+  onSelectDrone: (droneId: string) => void;
+  onRemove: (connectionId: string) => void;
 };
 
-export function RobotCard({
+export const RobotCard = React.memo(function RobotCard({
   robot,
-  onSetActive,
-  onToggleVisibility,
+  isActive,
+  onSelectDrone,
   onRemove,
 }: RobotCardProps): React.JSX.Element {
-  const { classes } = useStyles({ isActive: robot.isActive });
+  const { classes } = useStyles({ isActive });
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  const handleSetActive = useCallback(() => {
-    onSetActive(robot.id);
-  }, [onSetActive, robot.id]);
-
-  const handleToggleVisibility = useCallback(() => {
-    onToggleVisibility(robot.id);
-  }, [onToggleVisibility, robot.id]);
+  const handleSelect = useCallback(() => {
+    onSelectDrone(robot.droneId);
+  }, [onSelectDrone, robot.droneId]);
 
   const handleRemoveClick = useCallback(() => {
     setConfirmOpen(true);
@@ -65,8 +59,8 @@ export function RobotCard({
 
   const handleConfirmRemove = useCallback(() => {
     setConfirmOpen(false);
-    onRemove(robot.id);
-  }, [onRemove, robot.id]);
+    onRemove(robot.connectionId);
+  }, [onRemove, robot.connectionId]);
 
   const handleCancelRemove = useCallback(() => {
     setConfirmOpen(false);
@@ -75,16 +69,18 @@ export function RobotCard({
   return (
     <Paper className={classes.card} elevation={0}>
       <div className={classes.header}>
-        <Box
-          className={classes.statusDot}
-          sx={{ backgroundColor: STATUS_COLORS[robot.status] }}
-        />
+        <Box className={classes.statusDot} sx={{ backgroundColor: STATUS_COLORS[robot.status] }} />
         <Typography className={classes.urlText} title={robot.url}>
           Drone {robot.droneId}
         </Typography>
-        <Tooltip title={robot.isActive ? "Active" : "Set as active"}>
-          <IconButton className={classes.actionButton} onClick={handleSetActive} size="small">
-            {robot.isActive ? (
+        <Tooltip title={isActive ? "Selected" : "Select drone"}>
+          <IconButton
+            className={classes.actionButton}
+            onClick={handleSelect}
+            size="small"
+            aria-label={isActive ? "Selected drone" : "Select drone"}
+          >
+            {isActive ? (
               <RadioButtonCheckedIcon fontSize="small" color="primary" />
             ) : (
               <RadioButtonUncheckedIcon fontSize="small" />
@@ -93,7 +89,13 @@ export function RobotCard({
         </Tooltip>
       </div>
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", px: 1 }}>
-        <Typography variant="caption" color="text.secondary" noWrap title={robot.url} sx={{ flex: 1, minWidth: 0 }}>
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          noWrap
+          title={robot.url}
+          sx={{ flex: 1, minWidth: 0 }}
+        >
           {robot.url}
         </Typography>
         <Typography
@@ -101,11 +103,12 @@ export function RobotCard({
           sx={{
             ml: 1,
             flexShrink: 0,
-            color: robot.status === "disconnected" || robot.status === "error"
-              ? "#EF5350"
-              : robot.status === "slow"
-                ? "#FFA726"
-                : "text.secondary",
+            color:
+              robot.status === "disconnected" || robot.status === "error"
+                ? "#EF5350"
+                : robot.status === "slow"
+                  ? "#FFA726"
+                  : "text.secondary",
             fontFamily: "monospace",
             fontSize: "0.65rem",
           }}
@@ -118,19 +121,15 @@ export function RobotCard({
         </Typography>
       </Box>
       <div className={classes.actions}>
-        <Tooltip title={robot.isVisible ? "Hide visualization" : "Show visualization"}>
-          <IconButton className={classes.actionButton} onClick={handleToggleVisibility} size="small">
-            {robot.isVisible ? (
-              <VisibilityIcon fontSize="small" />
-            ) : (
-              <VisibilityOffIcon fontSize="small" color="disabled" />
-            )}
-          </IconButton>
-        </Tooltip>
-        <Tooltip title="Backend interaction (coming soon)">
+        <Tooltip title="Visualization enabled">
           <span>
-            <IconButton className={classes.actionButton} disabled size="small">
-              <ExtensionIcon fontSize="small" />
+            <IconButton
+              className={classes.actionButton}
+              disabled
+              size="small"
+              aria-label="Visualization enabled"
+            >
+              <VisibilityIcon fontSize="small" color="primary" />
             </IconButton>
           </span>
         </Tooltip>
@@ -159,4 +158,4 @@ export function RobotCard({
       </Dialog>
     </Paper>
   );
-}
+});

@@ -25,6 +25,7 @@ import {
   Topic,
 } from "@lichtblick/suite";
 import { AppSetting } from "@lichtblick/suite-base/AppSetting";
+import { useRobotConnectionsStore } from "@lichtblick/suite-base/components/MultiRobotSidebar/useRobotConnections";
 import { useAnalytics } from "@lichtblick/suite-base/context/AnalyticsContext";
 import { DEFAULT_SCENE_EXTENSION_CONFIG } from "@lichtblick/suite-base/panels/ThreeDeeRender/SceneExtensionConfig";
 import {
@@ -34,13 +35,16 @@ import {
 import {
   TOPIC_CONFIG,
   WAYPOINT_COLORS,
+  droneTopics,
   extractDroneIdFromTopic,
+  extractDroneIdFromRobotModelTopic,
   TELEMETRY_TOPICS,
 } from "@lichtblick/suite-base/spikive/config/topicConfig";
+import { buildActiveDronePanelConfig } from "@lichtblick/suite-base/spikive/hooks/useActiveDroneRouting";
 import { useDroneTelemetryStore } from "@lichtblick/suite-base/spikive/stores/useDroneTelemetryStore";
 import { useSceneModeStore } from "@lichtblick/suite-base/spikive/stores/useSceneModeStore";
-import { useWaypointStore } from "@lichtblick/suite-base/spikive/stores/useWaypointStore";
 import { useVisualizationStore } from "@lichtblick/suite-base/spikive/stores/useVisualizationStore";
+import { useWaypointStore } from "@lichtblick/suite-base/spikive/stores/useWaypointStore";
 import ThemeProvider from "@lichtblick/suite-base/theme/ThemeProvider";
 
 import type { IRenderer, ImageModeConfig, RendererConfig, RendererSubscription } from "./IRenderer";
@@ -62,13 +66,60 @@ import {
   makePoseEstimateMessage,
   makePoseMessage,
 } from "./publish";
-import type { Pose } from "./transforms/geometry";
 import type { LayerSettingsTransform } from "./renderables/FrameAxes";
 import { PublishClickEventMap } from "./renderables/PublishClickTool";
 import { DEFAULT_PUBLISH_SETTINGS } from "./renderables/PublishSettings";
+import type { Pose } from "./transforms/geometry";
 import { Shared3DPanelState, ThreeDeeRenderProps } from "./types";
 
 const log = Logger.getLogger(__filename);
+
+const WAYPOINT_MARKERS_RE = /^\/drone_\d+_waypoint_markers$/;
+const PROJECT_LIST_RE = /^\/drone_\d+_waypoint_project_list$/;
+const EXEC_STATE_RE = /^\/drone_\d+_waypoint_exec_state$/;
+const ODOM_RE = /^\/drone_\w+_visual_slam\/odom$/;
+
+function isPointCloudTopicName(topicName: string): boolean {
+  return topicName.endsWith("_cloud_registered");
+}
+
+function pointCloudTopicNamesForConfig(
+  configTopics: Readonly<Record<string, unknown>>,
+  visualDroneId: string | undefined,
+): string[] {
+  const names = new Set<string>();
+
+  if (visualDroneId != undefined) {
+    names.add(droneTopics(visualDroneId).pointCloud);
+  }
+
+  for (const topicName of Object.keys(configTopics)) {
+    if (isPointCloudTopicName(topicName)) {
+      names.add(topicName);
+    }
+  }
+
+  if (names.size === 0) {
+    names.add(TOPIC_CONFIG.subscribe.pointCloud);
+  }
+
+  return [...names];
+}
+
+function hasPointCloudPatch(
+  settings: Record<string, unknown> | undefined,
+  patch: Record<string, unknown>,
+): boolean {
+  if (settings == undefined) {
+    return true;
+  }
+  for (const [key, value] of Object.entries(patch)) {
+    if (settings[key] !== value) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * A panel that renders a 3D scene. This is a thin wrapper around a `Renderer` instance.
@@ -129,6 +180,9 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
   const [canvas, setCanvas] = useState<HTMLCanvasElement | ReactNull>(ReactNull);
   const [renderer, setRenderer] = useState<IRenderer | undefined>(undefined);
   const rendererRef = useRef<IRenderer | undefined>(undefined);
+  const activeDroneId = useRobotConnectionsStore((s) => s.activeDroneId);
+  const visualDroneId = useRobotConnectionsStore((s) => s.visualDroneId ?? s.robots[0]?.droneId);
+  const visualRouteVersion = useRobotConnectionsStore((s) => s.visualRouteVersion);
 
   const displayTemporaryError = useCallback(
     (errorString: string) => {
@@ -362,6 +416,30 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
     }
   }, [config, renderer]);
 
+  // Spikive: the sidebar owns the visible 3D target separately from selected
+  // control target. Apply routing directly to the mounted renderer instead of
+  // only patching layout cache; otherwise the current panel can keep rendering
+  // its stale local config.
+  useEffect(() => {
+    if (!renderer || visualDroneId == undefined) {
+      return;
+    }
+
+    const nextConfig = buildActiveDronePanelConfig(
+      renderer.config as unknown as Record<string, unknown>,
+      visualDroneId,
+    ) as RendererConfig | undefined;
+    if (nextConfig == undefined) {
+      return;
+    }
+
+    renderer.updateConfig((draft) => {
+      Object.assign(draft, nextConfig);
+    });
+    renderer.setFollowFrameId(nextConfig.followTf);
+    renderRef.current.needsRender = true;
+  }, [visualDroneId, visualRouteVersion, renderer]);
+
   // Update the renderer's reference to `topics` when it changes
   useEffect(() => {
     if (renderer) {
@@ -390,13 +468,13 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
       pointSize: vizPointSize,
     };
 
-    // Apply to ALL point cloud topics (all drones share the same visualization style)
-    const pcTopicNames = (renderer.topics ?? [])
-      .filter((t) => t.name.endsWith("_cloud_registered"))
-      .map((t) => t.name);
+    const pcTopicNames = pointCloudTopicNamesForConfig(renderer.config.topics, visualDroneId);
+    const needsPatch = pcTopicNames.some((name) =>
+      hasPointCloudPatch(renderer.config.topics[name] as Record<string, unknown> | undefined, patch),
+    );
 
-    if (pcTopicNames.length === 0) {
-      pcTopicNames.push(TOPIC_CONFIG.subscribe.pointCloud);
+    if (!needsPatch) {
+      return;
     }
 
     // Batch update config (single immer produce)
@@ -418,7 +496,16 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
         } as SettingsTreeAction);
       }
     }
-  }, [renderer, vizDecayTime, vizColorMode, vizColorMap, vizExplicitAlpha, vizPointSize]);
+  }, [
+    renderer,
+    config.topics,
+    visualDroneId,
+    vizDecayTime,
+    vizColorMode,
+    vizColorMap,
+    vizExplicitAlpha,
+    vizPointSize,
+  ]);
 
   // Tell the renderer if we are connected to a ROS data source
   useEffect(() => {
@@ -716,7 +803,7 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
     if (topics) {
       // Subscribe to all per-drone waypoint_markers topics
       const waypointMarkerSubs = topics
-        .filter((t) => /^\/drone_\d+_waypoint_markers$/.test(t.name))
+        .filter((t) => WAYPOINT_MARKERS_RE.test(t.name))
         .map((t) => ({
           topic: t.name,
           preload: false as const,
@@ -726,7 +813,7 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
 
       // Subscribe to all per-drone waypoint_project_list topics
       const projectListSubs = topics
-        .filter((t) => /^\/drone_\d+_waypoint_project_list$/.test(t.name))
+        .filter((t) => PROJECT_LIST_RE.test(t.name))
         .map((t) => ({
           topic: t.name,
           preload: false as const,
@@ -736,7 +823,7 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
 
       // Subscribe to all per-drone waypoint_exec_state topics
       const execStateSubs = topics
-        .filter((t) => /^\/drone_\d+_waypoint_exec_state$/.test(t.name))
+        .filter((t) => EXEC_STATE_RE.test(t.name))
         .map((t) => ({
           topic: t.name,
           preload: false as const,
@@ -752,7 +839,7 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
     if (sceneMode === "mapping-waypoint" && topics) {
       // Subscribe to all odom topics for position display (mapping mode only)
       const odomSubs = topics
-        .filter((t) => /^\/drone_\w+_visual_slam\/odom$/.test(t.name))
+        .filter((t) => ODOM_RE.test(t.name))
         .map((t) => ({
           topic: t.name,
           preload: false as const,
@@ -844,7 +931,7 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
     for (const message of currentFrameMessages) {
       // Spikive: intercept waypoint-related topics in ALL modes
       // Intercept per-drone /waypoint_markers: rewrite colors before rendering, then parse for store
-      if (/^\/drone_\d+_waypoint_markers$/.test(message.topic)) {
+      if (WAYPOINT_MARKERS_RE.test(message.topic)) {
         const markerArray = message.message as {
           markers?: Array<{
             id?: number;
@@ -898,7 +985,7 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
       }
 
       // Intercept per-drone /waypoint_project_list: parse project names into store
-      if (/^\/drone_\d+_waypoint_project_list$/.test(message.topic)) {
+      if (PROJECT_LIST_RE.test(message.topic)) {
         try {
           const payload = (message.message as { data: string }).data;
           const data = JSON.parse(payload) as { projects?: string[] };
@@ -916,7 +1003,7 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
       }
 
       // Intercept per-drone /waypoint_exec_state: update execution state in store
-      if (/^\/drone_\d+_waypoint_exec_state$/.test(message.topic)) {
+      if (EXEC_STATE_RE.test(message.topic)) {
         try {
           const payload = (message.message as { data: string }).data;
           if (payload === "idle" || payload === "executing") {
@@ -934,13 +1021,13 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
       // Spikive: in mapping mode, intercept odom for position display
       if (sceneMode === "mapping-waypoint") {
         // Intercept odom messages and push position into waypoint store
-        if (/^\/drone_\w+_visual_slam\/odom$/.test(message.topic)) {
+        if (ODOM_RE.test(message.topic)) {
           const droneId = extractDroneIdFromTopic(message.topic);
           if (droneId != undefined) {
             const odom = message.message as {
               pose?: { pose?: { position?: { x: number; y: number; z: number } } };
             };
-            const p = odom?.pose?.pose?.position;
+            const p = odom.pose?.pose?.position;
             if (p) {
               // log.info(`[Spikive] Odom update drone=${droneId}: ${p.x.toFixed(3)}, ${p.y.toFixed(3)}, ${p.z.toFixed(3)}`);
               updateOdom(droneId, { x: p.x, y: p.y, z: p.z });
@@ -1061,8 +1148,8 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
   }, [measureActive, renderer]);
 
   const [publishActive, setPublishActive] = useState(false);
-  // Spikive: lock the drone ID from the selected object when publish starts,
-  // so subsequent clicks (place-first-point, place-second-point) don't change it.
+  // Spikive: lock the active drone ID when publish starts, so subsequent
+  // clicks cannot accidentally publish to another drone.
   const publishDroneIdRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (renderer?.publishClickTool.publishClickType !== config.publish.type) {
@@ -1106,10 +1193,10 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
 
   useEffect(() => {
     const onStart = () => {
-      // Lock the drone ID from the currently selected Marker's `id` field at publish start
       const info = renderer?.getSelectedRenderableInfo();
-      const markerId = info?.details?.id;
-      publishDroneIdRef.current = markerId != null ? String(markerId) : undefined;
+      const selectedRobotDroneId =
+        info?.topic != undefined ? extractDroneIdFromRobotModelTopic(info.topic) : undefined;
+      publishDroneIdRef.current = selectedRobotDroneId ?? activeDroneId;
       setPublishActive(true);
     };
     const onSubmit = (event: PublishClickEventMap["foxglove.publish-submit"]) => {
@@ -1139,23 +1226,26 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
         worldPose = event.pose;
         if (displayFrameId !== WORLD_FRAME && renderer) {
           const curTime = renderer.currentTime;
-          const output: Pose = { position: { x: 0, y: 0, z: 0 }, orientation: { x: 0, y: 0, z: 0, w: 1 } };
+          const output: Pose = {
+            position: { x: 0, y: 0, z: 0 },
+            orientation: { x: 0, y: 0, z: 0, w: 1 },
+          };
           const transformed = renderer.transformTree.apply(
             output,
             event.pose,
-            WORLD_FRAME,       // frameId: target frame
-            undefined,         // rootFrameId: let the tree find the root
-            displayFrameId,    // srcFrameId: source frame of the input pose
-            curTime,           // dstTime
-            curTime,           // srcTime
+            WORLD_FRAME, // frameId: target frame
+            undefined, // rootFrameId: let the tree find the root
+            displayFrameId, // srcFrameId: source frame of the input pose
+            curTime, // dstTime
+            curTime, // srcTime
           );
           if (transformed) {
             worldPose = transformed;
             publishFrameId = WORLD_FRAME;
             log.info(
               `[Spikive] Transformed pose from ${displayFrameId} to ${WORLD_FRAME}: ` +
-              `(${event.pose.position.x.toFixed(2)}, ${event.pose.position.y.toFixed(2)}, ${event.pose.position.z.toFixed(2)}) → ` +
-              `(${worldPose.position.x.toFixed(2)}, ${worldPose.position.y.toFixed(2)}, ${worldPose.position.z.toFixed(2)})`,
+                `(${event.pose.position.x.toFixed(2)}, ${event.pose.position.y.toFixed(2)}, ${event.pose.position.z.toFixed(2)}) → ` +
+                `(${worldPose.position.x.toFixed(2)}, ${worldPose.position.y.toFixed(2)}, ${worldPose.position.z.toFixed(2)})`,
             );
           } else {
             log.warn(
@@ -1237,8 +1327,10 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
     context,
     latestPublishConfig,
     publishTopics,
+    renderer,
     renderer?.followFrameId,
     renderer?.publishClickTool,
+    activeDroneId,
   ]);
 
   const onClickPublish = useCallback(() => {

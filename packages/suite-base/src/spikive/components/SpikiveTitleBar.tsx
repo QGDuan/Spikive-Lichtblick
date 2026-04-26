@@ -1,6 +1,3 @@
-// SPDX-FileCopyrightText: Copyright (C) 2023-2026 Bayerische Motoren Werke Aktiengesellschaft (BMW AG)<lichtblick@bmwgroup.com>
-// SPDX-License-Identifier: MPL-2.0
-
 // SPDX-FileCopyrightText: Copyright (C) 2026 Spikive
 // SPDX-License-Identifier: MPL-2.0
 
@@ -66,23 +63,14 @@ export function SpikiveTitleBar(): React.JSX.Element {
       </div>
       <div className={classes.right}>
         <Tooltip title="设置">
-          <IconButton
-            size="small"
-            color="inherit"
-            onClick={() => {
-              setSettingsOpen(true);
-            }}
-          >
+          <IconButton size="small" color="inherit" onClick={() => setSettingsOpen(true)}>
             <Settings24Regular />
           </IconButton>
         </Tooltip>
       </div>
-      <SpikiveSettingsDialog
-        open={settingsOpen}
-        onClose={() => {
-          setSettingsOpen(false);
-        }}
-      />
+      {settingsOpen && (
+        <SpikiveSettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      )}
     </div>
   );
 }

@@ -40,6 +40,7 @@ import { HUDItemManager } from "@lichtblick/suite-base/panels/ThreeDeeRender/HUD
 import { LayerErrors } from "@lichtblick/suite-base/panels/ThreeDeeRender/LayerErrors";
 import { ICameraHandler } from "@lichtblick/suite-base/panels/ThreeDeeRender/renderables/ICameraHandler";
 import IAnalytics from "@lichtblick/suite-base/services/IAnalytics";
+import { isDroneRobotModelTopic } from "@lichtblick/suite-base/spikive/config/topicConfig";
 import { palette, fontMonospace } from "@lichtblick/theme";
 import { LabelMaterial, LabelPool } from "@lichtblick/three-text";
 
@@ -1622,6 +1623,13 @@ export class Renderer extends EventEmitter<RendererEvents> implements IRenderer 
   #isRenderablePickable(renderable: Renderable): boolean {
     const { topic } = renderable.userData;
     if (topic != undefined) {
+      // Spikive: only robot model markers are valid 3D selection sources.
+      // Point clouds, trajectories, paths, and waypoint markers must never
+      // become selected objects, even if a cached layout misses pickable=false.
+      if (/^\/drone_\d+_/.test(topic)) {
+        return isDroneRobotModelTopic(topic);
+      }
+
       const topicSettings = this.config.topics[topic] as Partial<BaseSettings> | undefined;
       if (topicSettings?.pickable === false) {
         return false;

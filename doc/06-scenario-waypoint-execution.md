@@ -81,9 +81,9 @@ topic `/drone_{id}_waypoint_exec_state` 仅发布两个值: `"idle"` 或 `"execu
 │  用户操作                前端处理                   通信层       后端处理        │
 │  ────────                ────────                   ────       ────────       │
 │                                                                              │
-│  ① 点选机器人   Interactions.tsx                                              │
-│  ──────────►   extractDroneIdFromTopic(topic)                                │
-│                activeDroneId = droneId ?? lastDroneIdRef                      │
+│  ① 选择目标     Interactions.tsx / RobotCard                                 │
+│  ──────────►   卡片 Select 或 robotModel topic                                │
+│                setActiveDroneId(droneId)                                      │
 │                     │                                                        │
 │                     ▼                                                        │
 │                DroneControlPanel(droneId) 渲染                                │
@@ -366,12 +366,18 @@ RendererOverlay
 ### 条件渲染逻辑 (Interactions.tsx)
 
 ```text
-  selectedObject 的 topic → extractDroneIdFromTopic() → droneId
-                                                         │
-  lastDroneIdRef.current 缓存最后的 droneId ◄────────────┘
-                                                         │
-  activeDroneId = droneId ?? lastDroneIdRef.current  ◄───┘
-  (两种模式都持久化，避免点击空白处面板消失)
+  activeDroneId = useRobotConnectionsStore(s => s.activeDroneId)
+
+  卡片 Select:
+    setActiveDroneId(robot.droneId)
+
+  3D robotModel selected object:
+    selectedObject.interactionData.topic
+      → extractDroneIdFromRobotModelTopic(topic)
+      → setActiveDroneId(droneId)
+
+  点云、轨迹、路径、航点 marker、空白:
+    不写 activeDroneId
 
   hasWaypoints = useWaypointStore(tables[activeDroneId]?.waypoints.length > 0)
 

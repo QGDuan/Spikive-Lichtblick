@@ -46,6 +46,11 @@ export const useDroneTelemetryStore = create<DroneTelemetryState>((set) => ({
   battery: undefined,
 
   updateBattery: (voltage: number) => {
-    set({ battery: voltageToBattery(voltage) });
+    set((state) => {
+      if (state.battery && Math.abs(state.battery.voltage - voltage) < 0.05) {
+        return state;
+      }
+      return { battery: voltageToBattery(voltage) };
+    });
   },
 }));

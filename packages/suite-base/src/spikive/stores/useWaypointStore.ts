@@ -48,6 +48,29 @@ export function applyZ(actualZ: number, state: DroneWaypointState): number {
   }
 }
 
+function sameWaypoints(a: Waypoint[] | undefined, b: Waypoint[]): boolean {
+  if (!a || a.length !== b.length) {
+    return false;
+  }
+  return a.every((wp, i) => {
+    const next = b[i];
+    return (
+      next != undefined &&
+      wp.idx === next.idx &&
+      wp.x === next.x &&
+      wp.y === next.y &&
+      wp.z === next.z
+    );
+  });
+}
+
+function sameStringList(a: string[] | undefined, b: string[]): boolean {
+  if (!a || a.length !== b.length) {
+    return false;
+  }
+  return a.every((value, i) => value === b[i]);
+}
+
 type WaypointStore = {
   tables: Record<string, DroneWaypointState>;
   latestOdom: Record<string, OdomPosition>;
@@ -85,6 +108,9 @@ export const useWaypointStore = create<WaypointStore>((set, get) => ({
   setWaypointsFromMarkers: (droneId: string, waypoints: Waypoint[]) => {
     set((s) => {
       const state = s.tables[droneId] ?? defaultDroneState();
+      if (sameWaypoints(state.waypoints, waypoints)) {
+        return s;
+      }
       return {
         tables: {
           ...s.tables,
@@ -110,14 +136,35 @@ export const useWaypointStore = create<WaypointStore>((set, get) => ({
   },
 
   updateOdom: (droneId: string, pos: OdomPosition) => {
-    set((s) => ({ latestOdom: { ...s.latestOdom, [droneId]: pos } }));
+    set((s) => {
+      const prev = s.latestOdom[droneId];
+      if (
+        prev &&
+        Math.abs(prev.x - pos.x) < 0.001 &&
+        Math.abs(prev.y - pos.y) < 0.001 &&
+        Math.abs(prev.z - pos.z) < 0.001
+      ) {
+        return s;
+      }
+      return { latestOdom: { ...s.latestOdom, [droneId]: pos } };
+    });
   },
 
   setProjectList: (droneId: string, list: string[]) => {
-    set((s) => ({ projectLists: { ...s.projectLists, [droneId]: list } }));
+    set((s) => {
+      if (sameStringList(s.projectLists[droneId], list)) {
+        return s;
+      }
+      return { projectLists: { ...s.projectLists, [droneId]: list } };
+    });
   },
 
   setExecState: (droneId: string, state: ExecState) => {
-    set((s) => ({ execStates: { ...s.execStates, [droneId]: state } }));
+    set((s) => {
+      if ((s.execStates[droneId] ?? "idle") === state) {
+        return s;
+      }
+      return { execStates: { ...s.execStates, [droneId]: state } };
+    });
   },
 }));

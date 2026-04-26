@@ -17,7 +17,7 @@ import {
   IconButton,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { AppSetting } from "@lichtblick/suite-base/AppSetting";
 import { useAppConfigurationValue } from "@lichtblick/suite-base/hooks";
@@ -52,6 +52,16 @@ export function SpikiveSettingsDialog({ open, onClose }: Props): React.JSX.Eleme
   const pointSize = useVisualizationStore((s) => s.pointSize);
   const updateSettings = useVisualizationStore((s) => s.updateSettings);
 
+  const [draftExplicitAlpha, setDraftExplicitAlpha] = useState(explicitAlpha);
+  const [draftPointSize, setDraftPointSize] = useState(pointSize);
+
+  useEffect(() => {
+    if (open) {
+      setDraftExplicitAlpha(explicitAlpha);
+      setDraftPointSize(pointSize);
+    }
+  }, [explicitAlpha, open, pointSize]);
+
   const handleBgChange = useCallback(
     (_: unknown, value: string | null) => {
       if (value === "light" || value === "dark") {
@@ -59,6 +69,28 @@ export function SpikiveSettingsDialog({ open, onClose }: Props): React.JSX.Eleme
       }
     },
     [setColorScheme],
+  );
+
+  const handleExplicitAlphaChange = useCallback((_: Event, value: number | number[]) => {
+    setDraftExplicitAlpha(value as number);
+  }, []);
+
+  const handleExplicitAlphaCommit = useCallback(
+    (_: Event | React.SyntheticEvent, value: number | number[]) => {
+      updateSettings({ explicitAlpha: value as number });
+    },
+    [updateSettings],
+  );
+
+  const handlePointSizeChange = useCallback((_: Event, value: number | number[]) => {
+    setDraftPointSize(value as number);
+  }, []);
+
+  const handlePointSizeCommit = useCallback(
+    (_: Event | React.SyntheticEvent, value: number | number[]) => {
+      updateSettings({ pointSize: value as number });
+    },
+    [updateSettings],
   );
 
   return (
@@ -142,11 +174,12 @@ export function SpikiveSettingsDialog({ open, onClose }: Props): React.JSX.Eleme
             )}
 
             <Typography variant="body2" gutterBottom>
-              透明度：{explicitAlpha.toFixed(2)}
+              透明度：{draftExplicitAlpha.toFixed(2)}
             </Typography>
             <Slider
-              value={explicitAlpha}
-              onChange={(_, v) => updateSettings({ explicitAlpha: v as number })}
+              value={draftExplicitAlpha}
+              onChange={handleExplicitAlphaChange}
+              onChangeCommitted={handleExplicitAlphaCommit}
               min={0.05}
               max={1}
               step={0.05}
@@ -154,11 +187,12 @@ export function SpikiveSettingsDialog({ open, onClose }: Props): React.JSX.Eleme
             />
 
             <Typography variant="body2" gutterBottom>
-              点大小：{pointSize.toFixed(1)}
+              点大小：{draftPointSize.toFixed(1)}
             </Typography>
             <Slider
-              value={pointSize}
-              onChange={(_, v) => updateSettings({ pointSize: v as number })}
+              value={draftPointSize}
+              onChange={handlePointSizeChange}
+              onChangeCommitted={handlePointSizeCommit}
               min={0.1}
               max={5}
               step={0.1}
