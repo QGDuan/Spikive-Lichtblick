@@ -38,6 +38,10 @@ import {
   TELEMETRY_TOPICS,
 } from "@lichtblick/suite-base/spikive/config/topicConfig";
 import { useDroneTelemetryStore } from "@lichtblick/suite-base/spikive/stores/useDroneTelemetryStore";
+import {
+  type ManagerSnapshot,
+  useManagerStatusStore,
+} from "@lichtblick/suite-base/spikive/stores/useManagerStatusStore";
 import { useSceneModeStore } from "@lichtblick/suite-base/spikive/stores/useSceneModeStore";
 import { useWaypointStore } from "@lichtblick/suite-base/spikive/stores/useWaypointStore";
 import { useVisualizationStore } from "@lichtblick/suite-base/spikive/stores/useVisualizationStore";
@@ -773,6 +777,17 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
           sampling: { mode: "latest-per-render-tick" as const },
         });
       }
+
+      // Spikive: subscribe to all per-drone astro_manager status topics so the
+      // sidebar Start/Restart button can drive its state machine.
+      const managerStatusSubs = topics
+        .filter((t) => /^\/drone_\d+_auto_manager_status$/.test(t.name))
+        .map((t) => ({
+          topic: t.name,
+          preload: false as const,
+          sampling: { mode: "latest-per-render-tick" as const },
+        }));
+      extraSubs.push(...managerStatusSubs);
     }
 
     if (extraSubs.length > 0) {
@@ -841,10 +856,17 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
       return;
     }
 
+    // Compile regex patterns once outside the loop for better performance
+    const WAYPOINT_MARKERS_RE = /^\/drone_\d+_waypoint_markers$/;
+    const PROJECT_LIST_RE = /^\/drone_\d+_waypoint_project_list$/;
+    const EXEC_STATE_RE = /^\/drone_\d+_waypoint_exec_state$/;
+    const ODOM_RE = /^\/drone_\w+_visual_slam\/odom$/;
+    const MANAGER_STATUS_RE = /^\/drone_(\d+)_auto_manager_status$/;
+
     for (const message of currentFrameMessages) {
       // Spikive: intercept waypoint-related topics in ALL modes
       // Intercept per-drone /waypoint_markers: rewrite colors before rendering, then parse for store
-      if (/^\/drone_\d+_waypoint_markers$/.test(message.topic)) {
+      if (WAYPOINT_MARKERS_RE.test(message.topic)) {
         const markerArray = message.message as {
           markers?: Array<{
             id?: number;
@@ -898,7 +920,7 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
       }
 
       // Intercept per-drone /waypoint_project_list: parse project names into store
-      if (/^\/drone_\d+_waypoint_project_list$/.test(message.topic)) {
+      if (PROJECT_LIST_RE.test(message.topic)) {
         try {
           const payload = (message.message as { data: string }).data;
           const data = JSON.parse(payload) as { projects?: string[] };
@@ -916,7 +938,7 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
       }
 
       // Intercept per-drone /waypoint_exec_state: update execution state in store
-      if (/^\/drone_\d+_waypoint_exec_state$/.test(message.topic)) {
+      if (EXEC_STATE_RE.test(message.topic)) {
         try {
           const payload = (message.message as { data: string }).data;
           if (payload === "idle" || payload === "executing") {
@@ -934,7 +956,7 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
       // Spikive: in mapping mode, intercept odom for position display
       if (sceneMode === "mapping-waypoint") {
         // Intercept odom messages and push position into waypoint store
-        if (/^\/drone_\w+_visual_slam\/odom$/.test(message.topic)) {
+        if (ODOM_RE.test(message.topic)) {
           const droneId = extractDroneIdFromTopic(message.topic);
           if (droneId != undefined) {
             const odom = message.message as {
@@ -956,6 +978,52 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
           updateBattery(batteryMsg.voltage);
         }
         continue; // battery data is UI-only, no 3D rendering needed
+      }
+
+      // Spikive: intercept astro_manager status messages (all modes).
+      // Push them into the manager-status store; the sidebar Robot card
+      // reads from there to drive the Start/Restart button + status lights.
+      const managerMatch = /^\/drone_(\d+)_auto_manager_status$/.exec(message.topic);
+      if (managerMatch) {
+        const droneId = managerMatch[1]!;
+        const m = message.message as {
+          mode?: string;
+          is_active?: boolean;
+          starting?: boolean;
+          armed?: boolean;
+          last_error?: string;
+          last_error_seq?: number;
+          mavros_status?: number;
+          cam_driver_status?: number;
+          lidar_driver_status?: number;
+          slam_status?: number;
+          planner_status?: number;
+          ctrl_status?: number;
+        };
+        const clamp = (v: number | undefined): 0 | 1 | 2 => {
+          const n = v ?? 0;
+          return n === 2 ? 2 : n === 1 ? 1 : 0;
+        };
+        const snap: ManagerSnapshot = {
+          mode: m.mode ?? "",
+          isActive: m.is_active === true,
+          starting: m.starting === true,
+          armed: m.armed === true,
+          drivers: {
+            mavros: clamp(m.mavros_status),
+            lidar: clamp(m.lidar_driver_status),
+            cam: clamp(m.cam_driver_status),
+          },
+          algo: {
+            slam: clamp(m.slam_status),
+            planner: clamp(m.planner_status),
+          },
+          lastError: m.last_error ?? "",
+          lastErrorSeq: m.last_error_seq ?? 0,
+          lastUpdateMs: Date.now(),
+        };
+        useManagerStatusStore.getState().setSnapshot(droneId, snap);
+        continue;
       }
 
       renderer.addMessageEvent(message);

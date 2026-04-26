@@ -54,9 +54,16 @@ export const useRobotConnectionsStore = create<MultiRobotStore>((set, get) => ({
   },
 
   setActive: (id: string) => {
-    set((state) => ({
-      robots: state.robots.map((r) => ({ ...r, isActive: r.id === id })),
-    }));
+    set((state) => {
+      const currentActive = state.robots.find((r) => r.isActive);
+      // Skip if already active
+      if (currentActive?.id === id) {
+        return state;
+      }
+      return {
+        robots: state.robots.map((r) => ({ ...r, isActive: r.id === id })),
+      };
+    });
   },
 
   toggleVisibility: (id: string) => {
@@ -66,10 +73,17 @@ export const useRobotConnectionsStore = create<MultiRobotStore>((set, get) => ({
   },
 
   updateStatus: (id: string, status: ConnectionStatus, latencyMs?: number) => {
-    set((state) => ({
-      robots: state.robots.map((r) =>
-        r.id === id ? { ...r, status, latencyMs } : r,
-      ),
-    }));
+    set((state) => {
+      const robot = state.robots.find((r) => r.id === id);
+      // Skip update if status and latency haven't changed
+      if (robot && robot.status === status && robot.latencyMs === latencyMs) {
+        return state;
+      }
+      return {
+        robots: state.robots.map((r) =>
+          r.id === id ? { ...r, status, latencyMs } : r,
+        ),
+      };
+    });
   },
 }));

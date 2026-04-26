@@ -8,6 +8,8 @@ import { useCallback, useState } from "react";
 
 import { usePlayerSelection } from "@lichtblick/suite-base/context/PlayerSelectionContext";
 import { useActiveDroneRouting } from "@lichtblick/suite-base/spikive/hooks/useActiveDroneRouting";
+import { useManagerNotifications } from "@lichtblick/suite-base/spikive/hooks/useManagerNotifications";
+import { useRobotVisibilitySync } from "@lichtblick/suite-base/spikive/hooks/useRobotVisibilitySync";
 
 import { AddRobotDialog } from "./AddRobotDialog";
 import { useStyles } from "./MultiRobotSidebar.style";
@@ -58,9 +60,18 @@ export function MultiRobotSidebar(): React.JSX.Element {
   const { selectSource } = usePlayerSelection();
 
   useActiveDroneRouting();
+  useRobotVisibilitySync();
   useWebSocketMonitor();
+  useManagerNotifications();
 
-  const robots = useRobotConnectionsStore((s) => s.robots);
+  // Optimized: only re-render when robot count/order changes, not on status updates
+  const robots = useRobotConnectionsStore(
+    (s) => s.robots,
+    (prev, next) => {
+      if (prev.length !== next.length) return false;
+      return prev.every((p, i) => p.id === next[i]?.id);
+    },
+  );
   const addRobot = useRobotConnectionsStore((s) => s.addRobot);
   const setActive = useRobotConnectionsStore((s) => s.setActive);
   const toggleVisibility = useRobotConnectionsStore((s) => s.toggleVisibility);
