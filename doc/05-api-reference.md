@@ -270,6 +270,52 @@ export const WAYPOINT_COLORS = {
 
 ---
 
+### 2.2.2 Manager Start/Stop
+
+**路径**: `packages/suite-base/src/spikive/manager/`
+
+**身份边界**:
+
+| 项 | 说明 |
+| --- | --- |
+| 添加卡片 | 手动输入 `droneId`，先通过 `/drone_{id}_auto_manager_status` 的 `drone_id` 握手 |
+| Manager status | 以 `RobotEntry.droneId` 为 key；`message.drone_id` 只做一致性校验 |
+| Manager command | 只向 `/drone_{id}_command_topic` 单次发布 `start_all` / `shutdown_all` |
+| Manager ACK | 后端在 `AutoManager.command.extra_data.request_id` 回显同一个 request id |
+
+**Store**:
+
+```typescript
+type ManagerStatusSnapshot = {
+  droneId: string;
+  mode: string;
+  isActive: boolean;
+  starting: boolean;
+  stopping: boolean;
+  armed: boolean;
+  mavrosStatus: 0 | 1 | 2;
+  lidarStatus: 0 | 1 | 2;
+  slamStatus: 0 | 1 | 2;
+  plannerStatus: 0 | 1 | 2;
+  lastCommandType: string;
+  lastCommandRequestId: string;
+  lastUpdateMs: number;
+};
+```
+
+**约束**:
+
+- Manager Start/Stop 不读取 `activeDroneId`、`visualDroneId`、SelectObject 或 robotModel topic。
+- 前端不发布 restart，后端也不实现 restart。
+- 一次确认只产生一次 publish；`pendingRequest` 等待 status ACK，超时或 publish 异常只标记失败，不自动重发。
+- `astro_manager/Command.extra_data` 使用 JSON `{request_id, seq, drone_id}` 做 ACK 关联，不参与后端安全决策。
+- ACK 只表示后端已接收/处理该 request，不表示启动或停止成功；真正结果继续读取 `starting/stopping/is_active/last_error_seq`。
+- 后端在 `_on_command()` 接收阶段拒绝 armed、busy、队列已有待处理命令、重复 start、空 stop、未知命令；被拒绝命令不进入队列，但仍回显 request id 并更新 `last_error_seq`。
+- 卡片状态灯固定为 Drivers: MavROS/Lidar，Tasks: SLAM/Planner。
+- Manager status 低频订阅，不进入 3D routing，不影响点云渲染路径。
+
+---
+
 ### 2.3 useSceneModeStore.ts
 
 **路径**: `packages/suite-base/src/spikive/stores/useSceneModeStore.ts` (19 行)
@@ -629,7 +675,7 @@ interface RobotEntry {
 
 | Action | 说明 |
 | --- | --- |
-| `addRobot(url, droneId)` | 添加机器人 (URL 去尾斜杠标准化, 互斥检查: URL + droneId 唯一) |
+| `addRobot(url, droneId)` | 添加已通过 Manager `drone_id` 握手的机器人 (URL 去尾斜杠标准化, 互斥检查: URL + droneId 唯一) |
 | `removeRobot(connectionId)` | 移除连接/卡片；如果移除 active drone，则清空 active |
 | `setActiveDroneId(droneId)` | 统一处理卡片 Select、3D robotModel 等选择/控制目标变更 |
 | `updateStatus(connectionId, status, latencyMs?)` | 通过连接实例 ID 更新连接状态和延迟 |

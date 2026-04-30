@@ -80,9 +80,13 @@ Mapping and waypoint:
 
 Backend manager boundary:
 
-- Current Spikive-Lichtblick frontend does not include AstroManager status subscription, Manager store, Manager command hook, notifications, Start/Restart buttons, or Manage error UI.
-- Do not reintroduce old Manager status topics, command topics, status stores, command hooks, or Manager card buttons unless the user explicitly asks for a new backend-manager design.
-- External backend repositories may still contain AstroManager code and ROS messages. That is not current frontend capability in this repo.
+- Current Spikive-Lichtblick frontend includes an AstroManager Start/Stop card chain, but it is strictly separate from Select/Visual.
+- Adding a card requires two checks: Foxglove WebSocket connectivity and Manager handshake on `/drone_{id}_auto_manager_status` where `message.drone_id` equals the manually entered `Drone ID`.
+- Manager Start/Stop uses only the card's `RobotEntry.droneId` to build `/drone_{id}_command_topic`; never use SelectObject, `activeDroneId`, `visualDroneId`, selected ids, or 3D topic parsing for backend lifecycle commands.
+- Manager commands are single-publish requests with status ACK. Put `{request_id, seq, drone_id}` JSON in `Command.extra_data`; frontend waits for the same `AutoManager.command.extra_data.request_id` and must not auto-resend on timeout. ACK means backend received/handled the request, not that startup/shutdown succeeded.
+- Frontend and backend support only `start_all` and `shutdown_all`. Do not restore `restart_all`, `restart_node`, Restart buttons, or Manage error UI.
+- Card Manager status lights are fixed to Drivers: MavROS/Lidar and Tasks: SLAM/Planner.
+- Backend authority remains in `/home/colman/Project/drone/Spikive_Manager`: `_on_command()` must reject armed, busy, already-pending, repeated start, empty stop, and unknown commands before queueing, while still echoing the request id in status.
 
 ## Debugging playbooks
 
@@ -103,7 +107,8 @@ Cannot select the drone:
 
 First publish is dropped:
 
-- Do not call advertise/register and publish back-to-back as the only path.
+- Do not call advertise/register and publish back-to-back as the only path. For custom ROS1 messages over Foxglove, advertise with full `schema` and `schemaEncoding: "ros1msg"` as well as local datatypes.
+- Do not fix command uncertainty by blind retries. Manager Start/Stop should publish once, then wait for status ACK or fail closed.
 
 Waypoint project list is empty:
 

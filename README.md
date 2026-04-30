@@ -25,10 +25,12 @@ Spikive Ground Station 是一套面向多无人机 SLAM 建图、路径规划与
 
 ### 多机管理
 - 通过侧边栏添加/移除无人机（WebSocket 连接 + 健康监测）
+- 添加卡片需要 Manager 握手：手动输入 `Drone ID` 必须与 `/drone_{id}_auto_manager_status` 消息中的 `drone_id` 一致
 - 当前单机场景添加卡片后默认开启 3D 可视化；右上角 Select 单独决定控制目标
 - SelectObject 面板、飞控、航点和 GoalSet 只读同一个 `activeDroneId`；卡片 Select 与 3D robotModel 点击共用这一个 active
 - 动态 Topic 路由：`/drone_{id}_*` 命名空间隔离，可视化目标变化时同步重映射 6 类 Topic + TF 坐标系
 - `connectionId` 只管理卡片连接，`droneId` 只管理业务身份，`activeDroneId` 与 `visualDroneId` 分离
+- 每张卡片提供独立后端 Start/Stop 控制，只使用该卡片 `droneId`，不读取 SelectObject、`activeDroneId` 或 3D topic；命令单次发布并等待后端 status ACK，不自动重发；状态灯固定为 Drivers: MavROS/Lidar，Tasks: SLAM/Planner
 
 ### 两种操作场景
 

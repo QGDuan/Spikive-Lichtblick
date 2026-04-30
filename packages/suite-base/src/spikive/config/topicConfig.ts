@@ -36,6 +36,9 @@ const BASE_TOPICS = {
   startWaypointExec: "start_waypoint_exec",
   stopWaypointExec: "stop_waypoint_exec",
   waypointExecState: "waypoint_exec_state",
+  // Backend lifecycle manager topics
+  managerStatus: "auto_manager_status",
+  managerCommand: "command_topic",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -60,6 +63,8 @@ export type DroneTopics = {
   startWaypointExec: string;
   stopWaypointExec: string;
   waypointExecState: string;
+  managerStatus: string;
+  managerCommand: string;
 };
 
 /** Build fully-qualified topic names for a given drone ID. */
@@ -84,6 +89,8 @@ export function droneTopics(droneId: string | number): DroneTopics {
     startWaypointExec: `/drone_${id}_${BASE_TOPICS.startWaypointExec}`,
     stopWaypointExec: `/drone_${id}_${BASE_TOPICS.stopWaypointExec}`,
     waypointExecState: `/drone_${id}_${BASE_TOPICS.waypointExecState}`,
+    managerStatus: `/drone_${id}_${BASE_TOPICS.managerStatus}`,
+    managerCommand: `/drone_${id}_${BASE_TOPICS.managerCommand}`,
   };
 }
 
@@ -113,6 +120,12 @@ export function extractDroneIdFromRobotModelTopic(topic: string): string | undef
 /** Return true when a topic is the pickable robot model topic. */
 export function isDroneRobotModelTopic(topic: string | undefined): boolean {
   return topic != undefined && extractDroneIdFromRobotModelTopic(topic) != undefined;
+}
+
+/** Extract drone ID only from the AstroManager status topic. */
+export function extractDroneIdFromManagerStatusTopic(topic: string): string | undefined {
+  const match = /^\/drone_(\d+)_auto_manager_status$/.exec(topic);
+  return match?.[1];
 }
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,8 @@ import React, { useCallback, useState } from "react";
 
 import { usePlayerSelection } from "@lichtblick/suite-base/context/PlayerSelectionContext";
 import { useActiveDroneRouting } from "@lichtblick/suite-base/spikive/hooks/useActiveDroneRouting";
+import { verifyManagerHandshake } from "@lichtblick/suite-base/spikive/manager/managerHandshake";
+import { useManagerStatusStore } from "@lichtblick/suite-base/spikive/manager/useManagerStatusStore";
 
 import { AddRobotDialog } from "./AddRobotDialog";
 import { useStyles } from "./MultiRobotSidebar.style";
@@ -65,6 +67,7 @@ export function MultiRobotSidebar(): React.JSX.Element {
   const addRobot = useRobotConnectionsStore((s) => s.addRobot);
   const setActiveDroneId = useRobotConnectionsStore((s) => s.setActiveDroneId);
   const removeRobot = useRobotConnectionsStore((s) => s.removeRobot);
+  const clearManagerSnapshot = useManagerStatusStore((s) => s.clearSnapshot);
 
   const handleConnect = useCallback(
     async (url: string, droneId: string): Promise<{ success: boolean; error?: string }> => {
@@ -75,6 +78,15 @@ export function MultiRobotSidebar(): React.JSX.Element {
         return {
           success: false,
           error: err instanceof Error ? err.message : "Connection failed",
+        };
+      }
+
+      try {
+        await verifyManagerHandshake(url.trim(), droneId.trim());
+      } catch (err) {
+        return {
+          success: false,
+          error: err instanceof Error ? err.message : "Manager handshake failed",
         };
       }
 
@@ -98,6 +110,17 @@ export function MultiRobotSidebar(): React.JSX.Element {
     setDialogOpen(false);
   }, []);
 
+  const handleRemoveRobot = useCallback(
+    (connectionId: string) => {
+      const robot = robots.find((entry) => entry.connectionId === connectionId);
+      if (robot != undefined) {
+        clearManagerSnapshot(robot.droneId);
+      }
+      removeRobot(connectionId);
+    },
+    [clearManagerSnapshot, removeRobot, robots],
+  );
+
   return (
     <div className={classes.root}>
       <div className={classes.listContainer}>
@@ -116,7 +139,7 @@ export function MultiRobotSidebar(): React.JSX.Element {
               robot={robot}
               isActive={robot.droneId === activeDroneId}
               onSelectDrone={setActiveDroneId}
-              onRemove={removeRobot}
+              onRemove={handleRemoveRobot}
             />
           ))
         )}

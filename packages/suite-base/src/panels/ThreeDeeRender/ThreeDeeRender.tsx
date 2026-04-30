@@ -36,11 +36,19 @@ import {
   TOPIC_CONFIG,
   WAYPOINT_COLORS,
   droneTopics,
+  extractDroneIdFromManagerStatusTopic,
   extractDroneIdFromTopic,
   extractDroneIdFromRobotModelTopic,
   TELEMETRY_TOPICS,
 } from "@lichtblick/suite-base/spikive/config/topicConfig";
 import { buildActiveDronePanelConfig } from "@lichtblick/suite-base/spikive/hooks/useActiveDroneRouting";
+import {
+  CommandDatatypes,
+  CommandSchema,
+  makeManagerCommandMessage,
+} from "@lichtblick/suite-base/spikive/manager/datatypes";
+import { useManagerCommandStore } from "@lichtblick/suite-base/spikive/manager/useManagerCommandStore";
+import { useManagerStatusStore } from "@lichtblick/suite-base/spikive/manager/useManagerStatusStore";
 import { useDroneTelemetryStore } from "@lichtblick/suite-base/spikive/stores/useDroneTelemetryStore";
 import { useSceneModeStore } from "@lichtblick/suite-base/spikive/stores/useSceneModeStore";
 import { useVisualizationStore } from "@lichtblick/suite-base/spikive/stores/useVisualizationStore";
@@ -78,6 +86,14 @@ const WAYPOINT_MARKERS_RE = /^\/drone_\d+_waypoint_markers$/;
 const PROJECT_LIST_RE = /^\/drone_\d+_waypoint_project_list$/;
 const EXEC_STATE_RE = /^\/drone_\d+_waypoint_exec_state$/;
 const ODOM_RE = /^\/drone_\w+_visual_slam\/odom$/;
+const MANAGER_STATUS_RE = /^\/drone_\d+_auto_manager_status$/;
+const MANAGER_COMMAND_ADVERTISE_SETTLE_MS = 100;
+
+const MANAGER_COMMAND_ADVERTISE_OPTIONS = {
+  datatypes: CommandDatatypes,
+  schema: CommandSchema,
+  schemaEncoding: "ros1msg",
+};
 
 function isPointCloudTopicName(topicName: string): boolean {
   return topicName.endsWith("_cloud_registered");
@@ -183,6 +199,13 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
   const activeDroneId = useRobotConnectionsStore((s) => s.activeDroneId);
   const visualDroneId = useRobotConnectionsStore((s) => s.visualDroneId ?? s.robots[0]?.droneId);
   const visualRouteVersion = useRobotConnectionsStore((s) => s.visualRouteVersion);
+  const managerDroneIdsKey = useRobotConnectionsStore((s) =>
+    s.robots.map((robot) => robot.droneId).join("|"),
+  );
+  const managerDroneIds = useMemo(
+    () => (managerDroneIdsKey.length > 0 ? managerDroneIdsKey.split("|") : []),
+    [managerDroneIdsKey],
+  );
 
   const displayTemporaryError = useCallback(
     (errorString: string) => {
@@ -786,6 +809,12 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
   const setWaypointsFromMarkers = useWaypointStore((s) => s.setWaypointsFromMarkers);
   const setProjectList = useWaypointStore((s) => s.setProjectList);
   const setExecState = useWaypointStore((s) => s.setExecState);
+  const setManagerSnapshot = useManagerStatusStore((s) => s.setSnapshotFromMessage);
+  const pendingManagerCommand = useManagerCommandStore((s) => s.pendingRequest);
+  const tryBeginManagerPublish = useManagerCommandStore((s) => s.tryBeginPublish);
+  const markManagerPublishedAttempt = useManagerCommandStore((s) => s.markPublishedAttempt);
+  const markManagerAcked = useManagerCommandStore((s) => s.markAcked);
+  const markManagerFailed = useManagerCommandStore((s) => s.markFailed);
 
   // Spikive: telemetry store for battery / GPS
   const updateBattery = useDroneTelemetryStore((s) => s.updateBattery);
@@ -801,6 +830,21 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
 
     // Spikive: subscribe to waypoint-related topics in ALL scene modes
     if (topics) {
+      const managerStatusSubs = managerDroneIds
+        .map((droneId) => {
+          const topicName = droneTopics(droneId).managerStatus;
+          const topic = topics.find((t) => t.name === topicName);
+          return topic != undefined
+            ? {
+                topic: topicName,
+                preload: false as const,
+                sampling: { mode: "latest-per-render-tick" as const },
+              }
+            : undefined;
+        })
+        .filter((sub): sub is Exclude<typeof sub, undefined> => sub != undefined);
+      extraSubs.push(...managerStatusSubs);
+
       // Subscribe to all per-drone waypoint_markers topics
       const waypointMarkerSubs = topics
         .filter((t) => WAYPOINT_MARKERS_RE.test(t.name))
@@ -832,7 +876,7 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
       extraSubs.push(...execStateSubs);
 
       log.info(
-        `[Spikive] Waypoint subs: ${waypointMarkerSubs.length} markers + ${projectListSubs.length} project_list + ${execStateSubs.length} exec_state`,
+        `[Spikive] Extra subs: ${managerStatusSubs.length} manager + ${waypointMarkerSubs.length} markers + ${projectListSubs.length} project_list + ${execStateSubs.length} exec_state`,
       );
     }
 
@@ -868,7 +912,85 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
 
     log.debug(`Subscribing to [${subs.map((t) => JSON.stringify(t)).join(", ")}]`);
     context.subscribe(subs);
-  }, [context, topicsToSubscribe, sceneMode, topics]);
+  }, [context, topicsToSubscribe, sceneMode, topics, managerDroneIds]);
+
+  useEffect(() => {
+    if (context.advertise == undefined) {
+      return;
+    }
+
+    const advertisedTopics = managerDroneIds.map((droneId) => droneTopics(droneId).managerCommand);
+    for (const topic of advertisedTopics) {
+      context.advertise(topic, "astro_manager/Command", MANAGER_COMMAND_ADVERTISE_OPTIONS);
+    }
+
+    return () => {
+      for (const topic of advertisedTopics) {
+        context.unadvertise?.(topic);
+      }
+    };
+  }, [context, managerDroneIds]);
+
+  useEffect(() => {
+    if (
+      pendingManagerCommand == undefined ||
+      context.publish == undefined ||
+      context.advertise == undefined ||
+      !tryBeginManagerPublish(pendingManagerCommand.seq)
+    ) {
+      return;
+    }
+
+    const topicsForDrone = droneTopics(pendingManagerCommand.droneId);
+    const commandTopic = topicsForDrone.managerCommand;
+    const commandMessage = makeManagerCommandMessage({
+      commandType: pendingManagerCommand.commandType,
+      requestId: pendingManagerCommand.requestId,
+      seq: pendingManagerCommand.seq,
+      droneId: pendingManagerCommand.droneId,
+    });
+    let canceled = false;
+
+    log.info(
+      `[Spikive] Manager command claimed seq=${pendingManagerCommand.seq} request_id=${pendingManagerCommand.requestId} topic=${commandTopic} type=${pendingManagerCommand.commandType}`,
+    );
+    context.advertise(
+      commandTopic,
+      "astro_manager/Command",
+      MANAGER_COMMAND_ADVERTISE_OPTIONS,
+    );
+
+    const timer = setTimeout(() => {
+      if (canceled) {
+        return;
+      }
+
+      try {
+        context.publish?.(commandTopic, commandMessage);
+        log.info(
+          `[Spikive] Manager command published seq=${pendingManagerCommand.seq} request_id=${pendingManagerCommand.requestId} topic=${commandTopic}`,
+        );
+        markManagerPublishedAttempt(pendingManagerCommand.seq);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        log.error(
+          `[Spikive] Manager command publish failed seq=${pendingManagerCommand.seq} topic=${commandTopic}: ${message}`,
+        );
+        markManagerFailed(pendingManagerCommand.seq, message);
+      }
+    }, MANAGER_COMMAND_ADVERTISE_SETTLE_MS);
+
+    return () => {
+      canceled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    context,
+    markManagerFailed,
+    markManagerPublishedAttempt,
+    pendingManagerCommand,
+    tryBeginManagerPublish,
+  ]);
 
   // Keep the renderer parameters up to date
   useEffect(() => {
@@ -928,7 +1050,28 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
       return;
     }
 
+    let needsRender = false;
+
     for (const message of currentFrameMessages) {
+      if (MANAGER_STATUS_RE.test(message.topic)) {
+        const managerDroneId = extractDroneIdFromManagerStatusTopic(message.topic);
+        if (managerDroneId != undefined) {
+          const accepted = setManagerSnapshot(
+            managerDroneId,
+            message.message as Parameters<typeof setManagerSnapshot>[1],
+          );
+          if (!accepted) {
+            log.warn(`[Spikive] Ignored manager status with mismatched drone_id on ${message.topic}`);
+          } else {
+            const snapshot = useManagerStatusStore.getState().snapshots[managerDroneId];
+            if (snapshot?.lastCommandRequestId) {
+              markManagerAcked(snapshot.lastCommandRequestId);
+            }
+          }
+        }
+        continue;
+      }
+
       // Spikive: intercept waypoint-related topics in ALL modes
       // Intercept per-drone /waypoint_markers: rewrite colors before rendering, then parse for store
       if (WAYPOINT_MARKERS_RE.test(message.topic)) {
@@ -960,6 +1103,7 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
             message: { ...markerArray, markers: recolored },
           };
           renderer.addMessageEvent(recoloredMessage);
+          needsRender = true;
 
           // Parse sphere markers for the waypoint store list
           const spheres = markerArray.markers
@@ -980,6 +1124,7 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
           }
         } else {
           renderer.addMessageEvent(message);
+          needsRender = true;
         }
         continue;
       }
@@ -1046,9 +1191,12 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
       }
 
       renderer.addMessageEvent(message);
+      needsRender = true;
     }
 
-    renderRef.current.needsRender = true;
+    if (needsRender) {
+      renderRef.current.needsRender = true;
+    }
   }, [
     currentFrameMessages,
     renderer,
@@ -1058,6 +1206,8 @@ export function ThreeDeeRender(props: Readonly<ThreeDeeRenderProps>): React.JSX.
     setProjectList,
     setExecState,
     updateBattery,
+    setManagerSnapshot,
+    markManagerAcked,
   ]);
 
   // Update the renderer when the camera moves

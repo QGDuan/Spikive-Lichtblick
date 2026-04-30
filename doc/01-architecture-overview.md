@@ -197,10 +197,10 @@ Workspace (根组件)
 │   ├── ThemeToggleButton ················· 读/写: AppSetting.COLOR_SCHEME
 │   │
 │   └── MultiRobotSidebar ················ 读: useRobotConnectionsStore
-│       ├── RobotCard (×N)                  写: setActiveDroneId / removeRobot
-│       │   └── 状态灯 + 延迟 + 操作按钮     读: useWebSocketMonitor (latency)
+│       ├── RobotCard (×N)                  写: setActiveDroneId / removeRobot / Manager command request
+│       │   └── 状态灯 + 延迟 + 操作按钮     读: WebSocket latency + Manager status
 │       │
-│       ├── AddRobotDialog                  写: addRobot (probeWebSocket 预检)
+│       ├── AddRobotDialog                  写: addRobot (probeWebSocket + Manager drone_id 握手)
 │       │
 │       ├── useActiveDroneRouting() ······· 读: visualDroneId
 │       │   └── 重写 3D Panel 的 topic 订阅   写: currentLayoutActions.savePanelConfigs()
@@ -218,6 +218,7 @@ Workspace (根组件)
     ├── [消息处理循环] ···················· currentFrameMessages
     │   ├── 正常渲染路径 → Renderer
     │   └── Odom 拦截 (mapping 模式) ····· 写: useWaypointStore.updateOdom()
+    │   └── Manager status 拦截 ·········· 写: useManagerStatusStore (按卡片 droneId 校验)
     │
     ├── [GoalSet 发布逻辑]
     │   ├── publishDroneIdRef (锁定机制)
@@ -703,7 +704,8 @@ Workspace (根组件)
 | 航线执行 | WaypointExecPanel → publish start/stop | waypoint_recorder 状态机 + 逐点 GoalSet |
 | 执行状态显示 | execState Store → UI 禁用控制 | waypoint_recorder 发布 exec_state |
 | 急停保护 | handleAbort() 双通道: cmd=5 + stop_exec | flight_manager 急停 + waypoint_recorder 停执行 |
+| 后端生命周期 | 卡片 Manager Start/Stop → 单次 publish command_topic → status ACK | astro_manager ACK 入队命令，并校验 armed/状态机后启动/停止 MavROS/Lidar/SLAM/Planner |
 | 定位 (SLAM) | — | Visual SLAM 输出 Odometry + TF |
 | TF 广播 | camera followTf 跟随 | odom_visualization 广播 world→base{id} |
 
-> 当前 Spikive-Lichtblick 前端不再集成 AstroManager 的状态订阅、Start/Restart 按钮或 Manager store。外部后端仓库可继续存在，但本仓库的前端职责只保留可视化、连接健康、飞控、GoalSet 和航点闭环。
+> Manager Start/Stop 是独立卡片链路：卡片创建前必须通过 `/drone_{id}_auto_manager_status.drone_id` 握手；命令只使用该卡片 `robot.droneId`，不读取 SelectObject、`activeDroneId`、`visualDroneId` 或 3D topic。一次确认只发布一次命令，前端用 `AutoManager.command.extra_data.request_id` 做 ACK 关联，超时只恢复 UI，不自动重发。

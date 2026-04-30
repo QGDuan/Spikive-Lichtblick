@@ -1304,8 +1304,17 @@ export default class FoxgloveWebSocketPlayer implements Player {
         encoding === "ros1" ? new Ros1MessageWriter(msgdef) : new Ros2MessageWriter(msgdef);
     }
 
-    const channelId = this.#client.advertise({ topic, encoding, schemaName });
-    log.info(`[advertiseChannel] Advertised ${topic} (schema=${schemaName}, encoding=${encoding}, channelId=${channelId})`);
+    const schema = typeof options?.["schema"] === "string" ? options["schema"] : undefined;
+    const schemaEncoding =
+      typeof options?.["schemaEncoding"] === "string" ? options["schemaEncoding"] : undefined;
+    const channelId = this.#client.advertise(
+      schema != undefined && schemaEncoding != undefined
+        ? { topic, encoding, schemaName, schema, schemaEncoding }
+        : { topic, encoding, schemaName },
+    );
+    log.info(
+      `[advertiseChannel] Advertised ${topic} (schema=${schemaName}, encoding=${encoding}, channelId=${channelId})`,
+    );
     this.#publicationsByTopic.set(topic, {
       id: channelId,
       topic,

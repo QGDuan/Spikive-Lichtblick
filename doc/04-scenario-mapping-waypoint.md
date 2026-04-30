@@ -794,6 +794,6 @@ Python 版独有（新版本不支持）：
 
 ### 14.4 后端启动控制
 
-**现状**: 当前 Spikive-Lichtblick 前端不集成后端节点生命周期管理。侧边栏只负责连接健康、默认可视化、Select 控制目标，不显示后端 Manager 状态，也不发布 Manager 命令。
+**现状**: 当前 Spikive-Lichtblick 前端已集成卡片级后端 Start/Stop。添加卡片时手动输入 `Drone ID`，并通过 `/drone_{id}_auto_manager_status.drone_id` 握手；卡片 Manager 按钮只使用该卡片 `robot.droneId`，不读取 Select/Visual/active id。
 
-**计划**: 若后续重新引入后端启动控制，需要单独设计，不应复用 Select/Visual 的 `activeDroneId` 入口，也不能让后端状态刷新触发 3D routing 或卡片 active 改变。
+**边界**: 后端状态刷新不能触发 3D routing 或卡片 active 改变。状态灯固定为 Drivers: MavROS/Lidar，Tasks: SLAM/Planner；前后端都不提供 restart。

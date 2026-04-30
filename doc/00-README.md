@@ -25,9 +25,11 @@
 
 ## 当前 ID 闭环
 
+- 添加卡片需要 Foxglove 连接成功，并且手动输入 `Drone ID` 与 Manager status 消息 `drone_id` 握手一致。
 - `activeDroneId` 是唯一选择/控制目标，卡片 Select 与 3D robotModel 点击都写入它。
 - SelectObject 面板、飞控、航点和 GoalSet 只读 `activeDroneId`。
 - `visualDroneId` 只负责 3D 显示和 routing；当前单机场景默认开启且不等同控制权。
+- Manager Start/Stop 只绑定卡片自己的 `robot.droneId`，与 active/visual/select object 无关；命令单次发布并等待后端 status ACK，不自动重发。
 - `selected_id`、marker `id`、`idFromMessage()`、`renderable.name` 只是渲染对象标识，不能当作 drone id。
 
 ## 文档导读
@@ -40,6 +42,7 @@
 | [04-scenario-mapping-waypoint.md](./04-scenario-mapping-waypoint.md) | 开发或调试 **建图打点** 场景 |
 | [05-api-reference.md](./05-api-reference.md) | 查找具体函数签名、Store API、消息格式 |
 | [06-scenario-waypoint-execution.md](./06-scenario-waypoint-execution.md) | 开发或调试 **航线执行** 功能 (自主飞行模式下加载并自动执行航线) |
+| [07-backend-manager-integration.md](./07-backend-manager-integration.md) | 开发或调试 **后端 Manager Start/Stop**、握手、状态灯和安全联锁 |
 | [drone-id-routing.md](./drone-id-routing.md) | Select/Visual 边界、drone_id 路由、渲染效率与鲁棒性策略 |
 
 ## 文档维护规范
